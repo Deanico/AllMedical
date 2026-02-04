@@ -1,10 +1,59 @@
-import { useState } from 'react'
-import ContactForm from './components/ContactForm'
 import logo from './assets/logobackgroundproper.png'
 import './App.css'
+import { useState } from 'react'
 
 function App() {
-  const [isFormOpen, setIsFormOpen] = useState(false)
+  const [formData, setFormData] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    insurance: '',
+    notes: '',
+  })
+  const [loading, setLoading] = useState(false)
+  const [submitted, setSubmitted] = useState(false)
+  const [error, setError] = useState('')
+
+  const handleChange = (e) => {
+    const { name, value } = e.target
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }))
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setLoading(true)
+    setError('')
+
+    try {
+      // Send SMS notification
+      const response = await fetch('/api/send-sms', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(formData),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to send message')
+      }
+
+      setSubmitted(true)
+      setFormData({ name: '', email: '', phone: '', insurance: '', notes: '' })
+      
+      // Reset submitted message after 5 seconds
+      setTimeout(() => {
+        setSubmitted(false)
+      }, 5000)
+    } catch (err) {
+      setError(err.message || 'Failed to submit form. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   return (
     <div className="min-h-screen bg-white">
@@ -123,54 +172,100 @@ function App() {
           <div className="bg-gray-50 rounded-lg p-10 shadow-lg">
             <h3 className="text-3xl font-bold text-center text-blue-900 mb-10">Contact All Medical, LLC</h3>
             
-            <form className="max-w-2xl mx-auto space-y-6">
-              {/* Name and Email Row */}
-              <div className="grid md:grid-cols-2 gap-6">
+            {submitted ? (
+              <div className="max-w-2xl mx-auto p-8 text-center">
+                <div className="mb-4">
+                  <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto">
+                    <span className="text-3xl text-green-600">✓</span>
+                  </div>
+                </div>
+                <h3 className="text-xl font-semibold text-gray-800 mb-2">Thank You!</h3>
+                <p className="text-gray-600">We'll be in touch soon!</p>
+              </div>
+            ) : (
+              <form onSubmit={handleSubmit} className="max-w-2xl mx-auto space-y-6">
+                {error && (
+                  <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+                    {error}
+                  </div>
+                )}
+
+                {/* Name and Email Row */}
+                <div className="grid md:grid-cols-2 gap-6">
+                  <div>
+                    <input
+                      type="text"
+                      name="name"
+                      value={formData.name}
+                      onChange={handleChange}
+                      placeholder="Full Name"
+                      required
+                      className="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <input
+                      type="email"
+                      name="email"
+                      value={formData.email}
+                      onChange={handleChange}
+                      placeholder="Email Address"
+                      required
+                      className="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Phone Number */}
+                <div>
+                  <input
+                    type="tel"
+                    name="phone"
+                    value={formData.phone}
+                    onChange={handleChange}
+                    placeholder="Phone Number"
+                    required
+                    className="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                {/* Insurance Provider */}
                 <div>
                   <input
                     type="text"
-                    placeholder="Full Name"
+                    name="insurance"
+                    value={formData.insurance}
+                    onChange={handleChange}
+                    placeholder="Insurance Provider (e.g., Blue Cross, UnitedHealthcare)"
+                    required
                     className="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
+
+                {/* Message */}
                 <div>
-                  <input
-                    type="email"
-                    placeholder="Email Address"
+                  <textarea
+                    name="notes"
+                    value={formData.notes}
+                    onChange={handleChange}
+                    placeholder="How can we help? (Please do not include sensitive medical information)"
+                    rows="5"
                     className="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+                  ></textarea>
                 </div>
-              </div>
 
-              {/* Phone Number */}
-              <div>
-                <input
-                  type="tel"
-                  placeholder="Phone Number"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              {/* Message */}
-              <div>
-                <textarea
-                  placeholder="How can we help? (Please do not include sensitive medical information)"
-                  rows="5"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                ></textarea>
-              </div>
-
-              {/* Submit Button */}
-              <div className="text-center">
-                <button
-                  type="button"
-                  onClick={() => setIsFormOpen(true)}
-                  className="bg-green-700 hover:bg-green-800 text-white font-bold py-4 px-12 rounded-md transition-colors text-lg"
-                >
-                  Send Message
-                </button>
-              </div>
-            </form>
+                {/* Submit Button */}
+                <div className="text-center">
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="bg-green-700 hover:bg-green-800 disabled:bg-gray-400 text-white font-bold py-4 px-12 rounded-md transition-colors text-lg"
+                  >
+                    {loading ? 'Sending...' : 'Send Message'}
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       </section>
@@ -184,9 +279,6 @@ function App() {
           </p>
         </div>
       </footer>
-
-      {/* Contact Form Modal */}
-      <ContactForm isOpen={isFormOpen} onClose={() => setIsFormOpen(false)} />
     </div>
   )
 }
