@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import ContactForm from './components/ContactForm'
+import logo from './assets/logobackgroundproper.png'
 import './App.css'
 
 function App() {
@@ -7,177 +8,182 @@ function App() {
 
   return (
     <div className="min-h-screen bg-white">
-      {/* Navigation */}
-      <nav className="bg-white shadow-sm sticky top-0 z-40">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex justify-between items-center">
-            <div className="text-2xl font-bold text-blue-600">AllMedical</div>
-            <div className="hidden md:flex space-x-8">
-              <a href="#services" className="text-gray-700 hover:text-blue-600 transition">Services</a>
-              <a href="#benefits" className="text-gray-700 hover:text-blue-600 transition">Benefits</a>
-              <a href="#about" className="text-gray-700 hover:text-blue-600 transition">About</a>
-            </div>
+      {/* Hero Section with Logo */}
+      <section className="bg-gradient-to-r from-blue-200 via-blue-100 to-yellow-100 py-20">
+        <div className="max-w-4xl mx-auto px-4 text-center">
+          {/* Logo */}
+          <div className="flex justify-center">
+            <img 
+              src={logo} 
+              alt="All Medical, LLC - 605-INSULIN" 
+              className="w-auto h-64 md:h-80 object-contain drop-shadow-md"
+            />
           </div>
-        </div>
-      </nav>
-
-      {/* Hero Section */}
-      <section className="bg-gradient-to-br from-blue-50 via-white to-blue-50 py-16 md:py-24">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid md:grid-cols-2 gap-12 items-center">
-            <div>
-              <h1 className="text-4xl md:text-5xl font-bold text-gray-900 leading-tight mb-4">
-                Insulin Pump Supplies Shipped At <span className="text-blue-600">No Cost to you</span>
-              </h1>
-              <p className="text-lg text-gray-600 mb-6">(Eligibility Required)</p>
-              <p className="text-xl font-semibold text-red-600 mb-8">
-                NO HMO's / Medicare
-              </p>
-              <p className="text-lg text-gray-700 mb-8 leading-relaxed">
-                All Medical, LLC will verify insurance and obtain correct endocrinologist (Dr) Information. 
-                Next, we ship supplies to your door/office.
-              </p>
-              
-              {/* Phone Number - Large */}
-              <div className="mb-8">
-                <p className="text-sm text-gray-600 mb-2">Please call:</p>
-                <a 
-                  href="tel:605-467-8546" 
-                  className="text-4xl md:text-5xl font-bold text-blue-600 hover:text-blue-700 transition block mb-2"
-                >
-                  605-INSULIN
-                </a>
-                <p className="text-2xl text-gray-700">(605-467-8546)</p>
-              </div>
-
-              <button
-                onClick={() => setIsFormOpen(true)}
-                className="bg-gradient-to-r from-blue-600 to-blue-700 text-white font-bold py-4 px-8 rounded-lg hover:from-blue-700 hover:to-blue-800 transition transform hover:scale-105 shadow-lg"
-              >
-                Contact Form
-              </button>
-            </div>
-            <div className="grid grid-cols-2 gap-4 h-80">
-              <div className="bg-gray-100 rounded-lg flex items-center justify-center p-4">
-                <div className="text-center">
-                  <div className="text-4xl mb-2">💉</div>
-                  <p className="text-sm font-semibold text-gray-700">Medtronic MiniMed</p>
-                </div>
-              </div>
-              <div className="bg-gray-100 rounded-lg flex items-center justify-center p-4">
-                <div className="text-center">
-                  <div className="text-4xl mb-2">🧬</div>
-                  <p className="text-sm font-semibold text-gray-700">Infusion Sets</p>
-                </div>
-              </div>
-              <div className="bg-gray-100 rounded-lg flex items-center justify-center p-4">
-                <div className="text-center">
-                  <div className="text-4xl mb-2">🔧</div>
-                  <p className="text-sm font-semibold text-gray-700">Reservoirs</p>
-                </div>
-              </div>
-              <div className="bg-gray-100 rounded-lg flex items-center justify-center p-4">
-                <div className="text-center">
-                  <div className="text-4xl mb-2">⭕</div>
-                  <p className="text-sm font-semibold text-gray-700">Omnipod Pods</p>
-                </div>
-              </div>
-            </div>
+          
+          <div className="mt-8">
+            <p className="text-xl md:text-2xl text-blue-900 font-semibold">Trusted Insulin Pump Supplier</p>
           </div>
         </div>
       </section>
 
-      {/* Supplies Section */}
+      {/* Main Content Section */}
       <section className="py-16 bg-white">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-          <h2 className="text-3xl font-bold text-center text-gray-900 mb-12">Insulin Pump Supplies such as:</h2>
-          <div className="space-y-6">
-            <div className="bg-gradient-to-r from-blue-50 to-white p-6 rounded-lg shadow-md border-l-4 border-blue-600">
-              <div className="flex items-center">
-                <span className="text-3xl mr-4">💉</span>
-                <div>
-                  <h3 className="text-2xl font-semibold text-gray-900">Medtronic MiniMed</h3>
-                  <p className="text-gray-600">Infusion Sets / Reservoirs</p>
-                </div>
-              </div>
-            </div>
-            <div className="bg-gradient-to-r from-blue-50 to-white p-6 rounded-lg shadow-md border-l-4 border-blue-600">
-              <div className="flex items-center">
-                <span className="text-3xl mr-4">⭕</span>
-                <div>
-                  <h3 className="text-2xl font-semibold text-gray-900">Omnipod</h3>
-                  <p className="text-gray-600">Pods</p>
-                </div>
-              </div>
-            </div>
-            <div className="bg-gradient-to-r from-blue-50 to-white p-6 rounded-lg shadow-md border-l-4 border-blue-600">
-              <div className="flex items-center">
-                <span className="text-3xl mr-4">🔧</span>
-                <div>
-                  <h3 className="text-2xl font-semibold text-gray-900">Cartridges</h3>
-                  <p className="text-gray-600">All compatible cartridges</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
+        <div className="max-w-6xl mx-auto px-4">
+          {/* Page Title */}
+          <h2 className="text-4xl font-bold text-center text-blue-900 mb-10">
+            Insulin Pump Supplier
+          </h2>
 
-      {/* CTA Section */}
-      <section className="bg-gradient-to-r from-blue-600 to-blue-700 py-16 text-white">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <h2 className="text-4xl font-bold mb-6">Ready to Get Your Supplies?</h2>
-          <div className="mb-8">
-            <p className="text-xl mb-4 text-blue-100">Call us today:</p>
-            <a 
-              href="tel:605-467-8546" 
-              className="text-5xl font-bold hover:text-blue-100 transition inline-block"
-            >
-              605-INSULIN
-            </a>
-            <p className="text-2xl mt-2 text-blue-100">(605-467-8546)</p>
-          </div>
-          <p className="text-xl mb-8 text-blue-100">
-            Or fill out our contact form below
+          {/* Description */}
+          <p className="text-center text-gray-700 text-lg leading-relaxed mb-16 max-w-3xl mx-auto">
+            All Medical, LLC provides reliable insulin pump supplies for daily diabetes care, 
+            including Medtronic MiniMed infusion sets, reservoirs, Omnipod pods, sensors, etc.
           </p>
-          <button
-            onClick={() => setIsFormOpen(true)}
-            className="bg-white text-blue-600 font-bold py-4 px-8 rounded-lg hover:bg-gray-100 transition transform hover:scale-105 shadow-lg"
-          >
-            Contact Form
-          </button>
+
+          {/* Product Cards - Three Column Layout */}
+          <div className="grid md:grid-cols-3 gap-8 mb-16">
+            {/* MiniMed Infusion Sets Card */}
+            <div className="bg-blue-50 rounded-lg p-8 shadow-md">
+              <h3 className="text-2xl font-bold text-blue-900 mb-6">MiniMed Infusion Sets</h3>
+              <ul className="space-y-3 text-gray-700">
+                <li className="flex items-start">
+                  <span className="text-blue-600 mr-2">•</span>
+                  <span>Quick-set®</span>
+                </li>
+                <li className="flex items-start">
+                  <span className="text-blue-600 mr-2">•</span>
+                  <span>Mio™ & Mio™ Advance</span>
+                </li>
+                <li className="flex items-start">
+                  <span className="text-blue-600 mr-2">•</span>
+                  <span>Silhouette™</span>
+                </li>
+                <li className="flex items-start">
+                  <span className="text-blue-600 mr-2">•</span>
+                  <span>Sure-T®</span>
+                </li>
+              </ul>
+              <div className="mt-8 flex justify-center">
+                <div className="text-6xl">💉</div>
+              </div>
+            </div>
+
+            {/* MiniMed Reservoirs Card */}
+            <div className="bg-green-50 rounded-lg p-8 shadow-md">
+              <h3 className="text-2xl font-bold text-blue-900 mb-6">MiniMed Reservoirs</h3>
+              <ul className="space-y-3 text-gray-700">
+                <li className="flex items-start">
+                  <span className="text-green-600 mr-2">•</span>
+                  <span>1.8 mL Reservoirs</span>
+                </li>
+                <li className="flex items-start">
+                  <span className="text-green-600 mr-2">•</span>
+                  <span>3.0 mL Reservoirs</span>
+                </li>
+                <li className="flex items-start">
+                  <span className="text-green-600 mr-2">•</span>
+                  <span>Leak-resistant design</span>
+                </li>
+              </ul>
+              <div className="mt-8 flex justify-center">
+                <div className="text-6xl">💧</div>
+              </div>
+            </div>
+
+            {/* Omnipod Pods Card */}
+            <div className="bg-yellow-50 rounded-lg p-8 shadow-md">
+              <h3 className="text-2xl font-bold text-blue-900 mb-6">Omnipod Pods</h3>
+              <ul className="space-y-3 text-gray-700">
+                <li className="flex items-start">
+                  <span className="text-yellow-600 mr-2">•</span>
+                  <span>Omnipod DASH® Pods</span>
+                </li>
+                <li className="flex items-start">
+                  <span className="text-yellow-600 mr-2">•</span>
+                  <span>Omnipod® 5 Pods</span>
+                </li>
+                <li className="flex items-start">
+                  <span className="text-yellow-600 mr-2">•</span>
+                  <span>No tubing required</span>
+                </li>
+              </ul>
+              <div className="mt-8 flex justify-center">
+                <div className="text-6xl">⭕</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Call to Action Box */}
+          <div className="bg-green-50 rounded-lg p-10 text-center shadow-lg mb-16">
+            <h3 className="text-3xl font-bold text-blue-900 mb-6">Need Insulin Pump Supplies?</h3>
+            <p className="text-2xl font-bold text-blue-700 mb-2">Call 605-INSULIN</p>
+          </div>
+
+          {/* Contact Form Section */}
+          <div className="bg-gray-50 rounded-lg p-10 shadow-lg">
+            <h3 className="text-3xl font-bold text-center text-blue-900 mb-10">Contact All Medical, LLC</h3>
+            
+            <form className="max-w-2xl mx-auto space-y-6">
+              {/* Name and Email Row */}
+              <div className="grid md:grid-cols-2 gap-6">
+                <div>
+                  <input
+                    type="text"
+                    placeholder="Full Name"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <input
+                    type="email"
+                    placeholder="Email Address"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              {/* Phone Number */}
+              <div>
+                <input
+                  type="tel"
+                  placeholder="Phone Number"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* Message */}
+              <div>
+                <textarea
+                  placeholder="How can we help? (Please do not include sensitive medical information)"
+                  rows="5"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                ></textarea>
+              </div>
+
+              {/* Submit Button */}
+              <div className="text-center">
+                <button
+                  type="button"
+                  onClick={() => setIsFormOpen(true)}
+                  className="bg-green-700 hover:bg-green-800 text-white font-bold py-4 px-12 rounded-md transition-colors text-lg"
+                >
+                  Send Message
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       </section>
 
       {/* Footer */}
-      <footer className="bg-gray-900 text-gray-400 py-12">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-8">
-            <h3 className="text-white font-bold text-2xl mb-4">All Medical, LLC</h3>
-            <p className="text-lg mb-4">Your trusted insulin pump supply partner</p>
-            <div className="text-xl">
-              <a href="tel:605-467-8546" className="hover:text-white transition">
-                📞 605-INSULIN (605-467-8546)
-              </a>
-            </div>
-          </div>
-          <div className="border-t border-gray-800 pt-8 text-center">
-            <p>&copy; 2026 All Medical, LLC. All rights reserved.</p>
-          </div>
+      <footer className="bg-gray-100 py-8 mt-16">
+        <div className="max-w-6xl mx-auto px-4 text-center">
+          <p className="text-gray-600 mb-2">© 2026 All Medical, LLC</p>
+          <p className="text-gray-500 text-sm">
+            This website does not provide medical advice. Consult your healthcare provider.
+          </p>
         </div>
       </footer>
-
-      {/* Floating Button */}
-      <button
-        onClick={() => setIsFormOpen(true)}
-        className="fixed right-6 bottom-6 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-bold py-4 px-6 rounded-full shadow-2xl hover:from-blue-700 hover:to-blue-800 transition transform hover:scale-110 z-40"
-        aria-label="Contact Form"
-      >
-        <div className="text-center">
-          <div className="text-xs">CONTACT</div>
-          <div className="text-xs">FORM</div>
-        </div>
-      </button>
 
       {/* Contact Form Modal */}
       <ContactForm isOpen={isFormOpen} onClose={() => setIsFormOpen(false)} />

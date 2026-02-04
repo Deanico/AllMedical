@@ -6,7 +6,8 @@ export default function ContactForm({ isOpen, onClose }) {
     name: '',
     email: '',
     phone: '',
-    insuranceProvider: '',
+    insurance: '',
+    notes: '',
   })
   const [loading, setLoading] = useState(false)
   const [submitted, setSubmitted] = useState(false)
@@ -39,7 +40,7 @@ export default function ContactForm({ isOpen, onClose }) {
       if (dbError) throw dbError
 
       setSubmitted(true)
-      setFormData({ name: '', email: '', phone: '', insuranceProvider: '' })
+      setFormData({ name: '', email: '', phone: '', insurance: '', notes: '' })
       
       // Auto-close after 3 seconds
       setTimeout(() => {
@@ -58,12 +59,11 @@ export default function ContactForm({ isOpen, onClose }) {
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
-        <div className="bg-gradient-to-r from-blue-600 to-blue-700 p-6 text-white">
-          <h2 className="text-2xl font-bold">Get Your Free Check</h2>
-          <p className="text-blue-100 mt-2">Fill out the form below and we'll contact you soon</p>
+        <div className="bg-gradient-to-r from-blue-600 to-blue-700 p-6 text-white relative">
+          <h2 className="text-2xl font-bold">Contact All Medical, LLC</h2>
           <button
             onClick={onClose}
-            className="absolute top-4 right-4 text-white hover:bg-white hover:bg-opacity-20 p-2 rounded-full transition"
+            className="absolute top-4 right-4 text-white hover:bg-white hover:bg-opacity-20 p-2 rounded-full transition w-8 h-8 flex items-center justify-center"
           >
             ✕
           </button>
@@ -76,8 +76,8 @@ export default function ContactForm({ isOpen, onClose }) {
                 <span className="text-3xl text-green-600">✓</span>
               </div>
             </div>
-            <h3 className="text-xl font-semibold text-gray-800 mb-2">Thanks for Checking!</h3>
-            <p className="text-gray-600">We will reach out soon!</p>
+            <h3 className="text-xl font-semibold text-gray-800 mb-2">Thank You!</h3>
+            <p className="text-gray-600">We'll be in touch soon!</p>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="p-6 space-y-4">
@@ -89,7 +89,7 @@ export default function ContactForm({ isOpen, onClose }) {
 
             <div>
               <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">
-                Full Name *
+                Full Name
               </label>
               <input
                 type="text"
@@ -98,14 +98,13 @@ export default function ContactForm({ isOpen, onClose }) {
                 value={formData.name}
                 onChange={handleChange}
                 required
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none transition"
-                placeholder="John Doe"
+                className="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
 
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-                Email
+                Email Address
               </label>
               <input
                 type="email"
@@ -113,14 +112,14 @@ export default function ContactForm({ isOpen, onClose }) {
                 name="email"
                 value={formData.email}
                 onChange={handleChange}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none transition"
-                placeholder="john@example.com"
+                required
+                className="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
 
             <div>
               <label htmlFor="phone" className="block text-sm font-medium text-gray-700 mb-1">
-                Phone Number *
+                Phone Number
               </label>
               <input
                 type="tel"
@@ -129,37 +128,49 @@ export default function ContactForm({ isOpen, onClose }) {
                 value={formData.phone}
                 onChange={handleChange}
                 required
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none transition"
-                placeholder="(555) 000-0000"
+                className="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
 
             <div>
-              <label htmlFor="insuranceProvider" className="block text-sm font-medium text-gray-700 mb-1">
-                Insurance Provider
+              <label htmlFor="insurance" className="block text-sm font-medium text-gray-700 mb-1">
+                Insurance Provider *
               </label>
               <input
                 type="text"
-                id="insuranceProvider"
-                name="insuranceProvider"
-                value={formData.insuranceProvider}
+                id="insurance"
+                name="insurance"
+                value={formData.insurance}
                 onChange={handleChange}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none transition"
-                placeholder="Your Insurance Provider"
+                required
+                className="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="e.g., Blue Cross, UnitedHealthcare"
               />
             </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold py-3 rounded-lg hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 disabled:cursor-not-allowed transition duration-200"
-            >
-              {loading ? 'Submitting...' : 'Submit'}
-            </button>
+            <div>
+              <label htmlFor="notes" className="block text-sm font-medium text-gray-700 mb-1">
+                Notes <span className="text-gray-500 text-xs">(Optional - Please do not include sensitive medical information)</span>
+              </label>
+              <textarea
+                id="notes"
+                name="notes"
+                value={formData.notes}
+                onChange={handleChange}
+                rows="4"
+                className="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              ></textarea>
+            </div>
 
-            <p className="text-xs text-gray-500 text-center">
-              We respect your privacy. Your information is secure with us.
-            </p>
+            <div className="pt-4">
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-green-700 hover:bg-green-800 disabled:bg-gray-400 text-white font-bold py-3 px-6 rounded-md transition-colors"
+              >
+                {loading ? 'Sending...' : 'Send Message'}
+              </button>
+            </div>
           </form>
         )}
       </div>
