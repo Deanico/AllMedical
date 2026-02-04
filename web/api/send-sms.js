@@ -1,21 +1,33 @@
-export default async function handler(req, res) {
+const twilio = require('twilio');
+
+module.exports = async function (context, req) {
+  context.log('SMS API function triggered');
+
   // Only allow POST requests
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' })
+    context.res = {
+      status: 405,
+      body: { error: 'Method not allowed' }
+    };
+    return;
   }
 
   try {
-    const { name, email, phone, insurance, notes } = req.body
+    const { name, email, phone, insurance, notes } = req.body;
 
     // Twilio credentials from environment variables
-    const accountSid = process.env.VITE_TWILIO_ACCOUNT_SID
-    const authToken = process.env.VITE_TWILIO_AUTH_TOKEN
-    const twilioPhone = process.env.VITE_TWILIO_PHONE_NUMBER
-    const yourPhone = process.env.VITE_YOUR_PHONE_NUMBER
+    const accountSid = process.env.VITE_TWILIO_ACCOUNT_SID;
+    const authToken = process.env.VITE_TWILIO_AUTH_TOKEN;
+    const twilioPhone = process.env.VITE_TWILIO_PHONE_NUMBER;
+    const yourPhone = process.env.VITE_YOUR_PHONE_NUMBER;
 
     if (!accountSid || !authToken || !twilioPhone || !yourPhone) {
-      console.error('Missing Twilio configuration')
-      return res.status(500).json({ error: 'SMS service not configured' })
+      context.log.error('Missing Twilio configuration');
+      context.res = {
+        status: 500,
+        body: { error: 'SMS service not configured' }
+      };
+      return;
     }
 
     // Create SMS message
@@ -24,20 +36,26 @@ Name: ${name}
 Email: ${email}
 Phone: ${phone}
 Insurance: ${insurance}
-Notes: ${notes || 'None'}`
+Notes: ${notes || 'None'}`;
 
     // Send SMS using Twilio
-    const twilio = require('twilio')(accountSid, authToken)
+    const client = twilio(accountSid, authToken);
     
-    await twilio.messages.create({
+    await client.messages.create({
       body: message,
       from: twilioPhone,
       to: yourPhone
-    })
+    });
 
-    return res.status(200).json({ success: true })
+    context.res = {
+      status: 200,
+      body: { success: true }
+    };
   } catch (error) {
-    console.error('Error sending SMS:', error)
-    return res.status(500).json({ error: 'Failed to send SMS' })
+    context.log.error('Error sending SMS:', error);
+    context.res = {
+      status: 500,
+      body: { error: 'Failed to send SMS' }
+    };
   }
-}
+};
