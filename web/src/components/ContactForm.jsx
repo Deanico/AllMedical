@@ -39,6 +39,20 @@ export default function ContactForm({ isOpen, onClose }) {
 
       if (dbError) throw dbError
 
+      // Send SMS notification
+      try {
+        await fetch('/api/send-sms', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(formData),
+        })
+      } catch (smsError) {
+        console.error('Failed to send SMS notification:', smsError)
+        // Don't fail the form submission if SMS fails
+      }
+
       setSubmitted(true)
       setFormData({ name: '', email: '', phone: '', insurance: '', notes: '' })
       

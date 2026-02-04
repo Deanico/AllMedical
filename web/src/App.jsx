@@ -1,4 +1,7 @@
 import logo from './assets/logobackgroundproper.png'
+import infusionSetImg from './assets/MinimedQuickSetInfusionSet.png'
+import reservoirImg from './assets/Medtronic_Resevoir.webp'
+import omnipodImg from './assets/omnipod.png'
 import './App.css'
 import { useState } from 'react'
 
@@ -86,7 +89,7 @@ function App() {
           {/* Description */}
           <p className="text-center text-gray-700 text-lg leading-relaxed mb-16 max-w-3xl mx-auto">
             All Medical, LLC provides reliable insulin pump supplies for daily diabetes care, 
-            including Medtronic MiniMed infusion sets, reservoirs, Omnipod pods, sensors, etc.
+            including Medtronic MiniMed infusion sets, reservoirs, Omnipod pods, sensors, etc. AT NO COST TO YOU! (with eligibility)
           </p>
 
           {/* Product Cards - Three Column Layout */}
@@ -113,7 +116,7 @@ function App() {
                 </li>
               </ul>
               <div className="mt-8 flex justify-center">
-                <div className="text-6xl">💉</div>
+                <img src={infusionSetImg} alt="MiniMed Infusion Set" className="w-48 h-48 object-contain" />
               </div>
             </div>
 
@@ -135,7 +138,7 @@ function App() {
                 </li>
               </ul>
               <div className="mt-8 flex justify-center">
-                <div className="text-6xl">💧</div>
+                <img src={reservoirImg} alt="MiniMed Reservoir" className="w-48 h-48 object-contain" />
               </div>
             </div>
 
@@ -157,7 +160,7 @@ function App() {
                 </li>
               </ul>
               <div className="mt-8 flex justify-center">
-                <div className="text-6xl">⭕</div>
+                <img src={omnipodImg} alt="Omnipod Pod" className="w-48 h-48 object-contain" />
               </div>
             </div>
           </div>
