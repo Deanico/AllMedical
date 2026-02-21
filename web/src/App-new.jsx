@@ -1,8 +1,8 @@
 import logo from './assets/logobackgroundproper.png'
-import newPhoto from './assets/Newphoto.jpg'
 import infusionSetImg from './assets/MinimedQuickSetInfusionSet.png'
 import reservoirImg from './assets/Medtronic_Resevoir.webp'
 import omnipodImg from './assets/omnipod.png'
+import suppliesScreenshot from './assets/Image-1.jpg'
 import './App.css'
 import { useState } from 'react'
 
@@ -61,43 +61,20 @@ function App() {
 
   return (
     <div className="min-h-screen bg-white">
-      {/* Logo in top right corner */}
-      <div className="fixed top-4 right-4 z-50">
-        <img 
-          src={logo} 
-          alt="All Medical, LLC - 605-INSULIN" 
-          className="w-24 h-24 md:w-32 md:h-32 object-contain drop-shadow-lg"
-        />
-      </div>
-
-      {/* Hero Section with New Photo */}
+      {/* Hero Section with Logo */}
       <section className="bg-gradient-to-r from-blue-200 via-blue-100 to-yellow-100 py-20">
-        <div className="max-w-5xl mx-auto px-4 text-center">
-          {/* Main Center Image - Cropped */}
-          <div className="flex justify-center mb-8 overflow-hidden" style={{ maxHeight: '500px' }}>
+        <div className="max-w-4xl mx-auto px-4 text-center">
+          {/* Logo */}
+          <div className="flex justify-center">
             <img 
-              src={newPhoto} 
-              alt="All Medical, LLC" 
-              className="w-auto object-cover object-top drop-shadow-md"
-              style={{ height: '620px', objectPosition: 'top' }}
+              src={logo} 
+              alt="All Medical, LLC - 605-INSULIN" 
+              className="w-auto h-64 md:h-80 object-contain drop-shadow-md"
             />
           </div>
           
           <div className="mt-8">
-            <p className="text-2xl md:text-3xl text-blue-900 font-bold mb-6">
-              Call{' '}
-              <a href="tel:605-467-8546" className="text-blue-700 hover:underline">605-INSULIN</a>
-              {' '}OR{' '}
-              <a href="tel:561-707-0965" className="text-blue-700 hover:underline">561-707-0965</a>
-            </p>
-            
-            {/* Contact Form Button */}
-            <button
-              onClick={() => document.getElementById('contact-form').scrollIntoView({ behavior: 'smooth' })}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xl px-8 py-4 rounded-full shadow-lg transform hover:scale-105 transition-all duration-200 animate-bounce"
-            >
-              Contact Form!
-            </button>
+            <p className="text-xl md:text-2xl text-blue-900 font-semibold">Trusted Insulin Pump Supplier</p>
           </div>
         </div>
       </section>
@@ -111,19 +88,27 @@ function App() {
           </h2>
 
           {/* Description */}
-          <div className="text-center mb-16 max-w-3xl mx-auto">
-            <p className="text-gray-700 text-lg leading-relaxed mb-2">
+          <div className="text-center max-w-3xl mx-auto mb-16">
+            <p className="text-gray-700 text-lg leading-relaxed">
               All Medical, LLC provides reliable insulin pump supplies for daily diabetes care, 
-              including Medtronic MiniMed infusion sets, reservoirs, Omnipod pods, sensors, etc. AT NO COST TO YOU!{' '}
-              <span className="text-sm">(with eligibility)</span>
+              including Medtronic MiniMed infusion sets, reservoirs, Omnipod pods, sensors, etc. AT NO COST TO YOU! <span className="text-sm">(with eligibility)</span>
             </p>
             <p className="text-gray-800 font-bold text-base mt-4">
-              NO HMOs, MEDICARE, OR MEDICAID
+              ONLY PPO'S, NO HMO, MEDICARE OR MEDICAID
             </p>
           </div>
 
-          {/* Product Cards - Three Column Layout */}
-          <div className="grid md:grid-cols-3 gap-8 mb-16">
+          {/* Product Cards - Four Column Layout */}
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8 mb-16">
+            {/* Screenshot Card */}
+            <div className="bg-purple-50 rounded-lg p-8 shadow-md flex items-center justify-center">
+              <img 
+                src={suppliesScreenshot} 
+                alt="All Medical Insulin Pump Supplies" 
+                className="w-full rounded-lg shadow-lg transform rotate-2 hover:rotate-0 transition-transform duration-300"
+              />
+            </div>
+
             {/* MiniMed Infusion Sets Card */}
             <div className="bg-blue-50 rounded-lg p-8 shadow-md">
               <h3 className="text-2xl font-bold text-blue-900 mb-6">MiniMed Infusion Sets</h3>
@@ -199,15 +184,12 @@ function App() {
           <div className="bg-green-50 rounded-lg p-10 text-center shadow-lg mb-16">
             <h3 className="text-3xl font-bold text-blue-900 mb-6">Need Insulin Pump Supplies?</h3>
             <p className="text-2xl font-bold text-blue-700 mb-2">
-              Call{' '}
-              <a href="tel:605-467-8546" className="hover:underline">605-INSULIN</a>
-              {' '}OR{' '}
-              <a href="tel:561-707-0965" className="hover:underline">561-707-0965</a>
+              Call <a href="tel:605-467-8546" className="hover:underline">605-INSULIN</a> OR <a href="tel:561-707-0965" className="hover:underline">561-707-0965</a>
             </p>
           </div>
 
           {/* Contact Form Section */}
-          <div id="contact-form" className="bg-gray-50 rounded-lg p-10 shadow-lg">
+          <div className="bg-gray-50 rounded-lg p-10 shadow-lg">
             <h3 className="text-3xl font-bold text-center text-blue-900 mb-10">Contact All Medical, LLC</h3>
             
             {submitted ? (
