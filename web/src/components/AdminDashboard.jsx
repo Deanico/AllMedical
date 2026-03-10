@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { generatePhysicianOrder, downloadPDF } from '../lib/generatePhysicianOrder'
 
 export default function AdminDashboard({ userEmail, onLogout }) {
   const [activeTab, setActiveTab] = useState('leads')
@@ -20,7 +21,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     zip_code: '',
     phone: ''
   })
-  const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', insurance: '' })
+  const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', insurance: '', birthday: '', address_line1: '', city: '', state: '', zip_code: '' })
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState(null)
   const [productNeeded, setProductNeeded] = useState('')
@@ -28,6 +29,9 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const [nppesSearch, setNppesSearch] = useState('')
   const [nppesResults, setNppesResults] = useState([])
   const [nppesLoading, setNppesLoading] = useState(false)
+  const [showDoctorSelectModal, setShowDoctorSelectModal] = useState(false)
+  const [generatingPDF, setGeneratingPDF] = useState(false)
+  const [showSuccessModal, setShowSuccessModal] = useState(false)
 
   useEffect(() => {
     fetchLeads()
@@ -277,6 +281,44 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     }
   }
 
+  const handleGeneratePhysicianOrder = async (doctor = null) => {
+    if (!selectedClient) return
+
+    // If no doctor specified and multiple doctors exist, show selection modal
+    if (!doctor && doctors.length > 1) {
+      setShowDoctorSelectModal(true)
+      return
+    }
+
+    // Use the provided doctor or the first one if only one exists
+    const selectedDoctor = doctor || doctors[0]
+
+    setGeneratingPDF(true)
+    try {
+      // Generate the document
+      const docBlob = await generatePhysicianOrder(selectedClient, selectedDoctor)
+      
+      // Create filename with patient name and date
+      const patientName = selectedClient.name.replace(/[^a-z0-9]/gi, '_')
+      const dateStr = new Date().toISOString().split('T')[0]
+      const fileName = `Physician_Order_${patientName}_${dateStr}.docx`
+      
+      // Download the document
+      downloadPDF(docBlob, fileName)
+      
+      // Close modal if open
+      setShowDoctorSelectModal(false)
+      
+      // Show success message
+      setShowSuccessModal(true)
+    } catch (error) {
+      console.error('Error generating physician order:', error)
+      alert('Failed to generate physician order: ' + error.message)
+    } finally {
+      setGeneratingPDF(false)
+    }
+  }
+
   const handleEditClient = async (e) => {
     e.preventDefault()
     if (!supabase || !selectedClient) return
@@ -288,7 +330,12 @@ export default function AdminDashboard({ userEmail, onLogout }) {
           name: editForm.name,
           email: editForm.email,
           phone: editForm.phone,
-          insurance: editForm.insurance
+          insurance: editForm.insurance,
+          birthday: editForm.birthday || null,
+          address_line1: editForm.address_line1,
+          city: editForm.city,
+          state: editForm.state,
+          zip_code: editForm.zip_code
         })
         .eq('id', selectedClient.id)
 
@@ -308,7 +355,12 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       name: selectedClient.name,
       email: selectedClient.email,
       phone: selectedClient.phone,
-      insurance: selectedClient.insurance
+      insurance: selectedClient.insurance,
+      birthday: selectedClient.birthday || '',
+      address_line1: selectedClient.address_line1 || '',
+      city: selectedClient.city || '',
+      state: selectedClient.state || '',
+      zip_code: selectedClient.zip_code || ''
     })
     setShowEditClientModal(true)
   }
@@ -536,7 +588,15 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                         selectedClient?.id === client.id ? 'bg-blue-50' : ''
                       }`}
                     >
-                      <div className="font-semibold text-gray-900">{client.name}</div>
+                      <div className="font-semibold text-gray-900">
+                        {client.name}
+                        {(!client.address_line1 || !client.birthday) && (
+                          <span className="ml-2 text-red-600 text-sm font-medium">
+                            {!client.address_line1 && !client.birthday ? 'Address & DOB Needed!' : 
+                             !client.address_line1 ? 'Address Needed!' : 'DOB Needed!'}
+                          </span>
+                        )}
+                      </div>
                       <div className="text-sm text-gray-600">{client.email}</div>
                       <div className="text-sm text-gray-600">{client.phone}</div>
                     </div>
@@ -564,39 +624,82 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                     </button>
                   </div>
 
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Email
-                      </label>
-                      <div className="text-gray-900">{selectedClient.email}</div>
-                    </div>
+                  {/* Two Column Layout for Basic Info */}
+                  <div className="grid md:grid-cols-2 gap-6">
+                    {/* Left Column - Contact & Address */}
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Email
+                        </label>
+                        <div className="text-gray-900">{selectedClient.email}</div>
+                      </div>
 
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Phone
-                      </label>
-                      <div className="text-gray-900">{selectedClient.phone}</div>
-                    </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Phone
+                        </label>
+                        <div className="text-gray-900">{selectedClient.phone}</div>
+                      </div>
 
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Insurance Provider
-                      </label>
-                      <div className="text-gray-900">{selectedClient.insurance}</div>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Date Qualified
-                      </label>
-                      <div className="text-gray-900">
-                        {selectedClient.qualified_at 
-                          ? new Date(selectedClient.qualified_at).toLocaleDateString()
-                          : 'N/A'}
+                      {/* Patient Address */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Patient Address
+                        </label>
+                        {selectedClient.address_line1 ? (
+                          <div className="text-gray-900">
+                            <div>{selectedClient.address_line1}</div>
+                            {(selectedClient.city || selectedClient.state || selectedClient.zip_code) && (
+                              <div>
+                                {selectedClient.city}{selectedClient.city && (selectedClient.state || selectedClient.zip_code) ? ', ' : ''}
+                                {selectedClient.state} {selectedClient.zip_code}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="text-red-600 text-sm font-medium">Not provided</div>
+                        )}
                       </div>
                     </div>
 
+                    {/* Right Column - Business Info */}
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Date of Birth
+                        </label>
+                        {selectedClient.birthday ? (
+                          <div className="text-gray-900">
+                            {new Date(selectedClient.birthday).toLocaleDateString()}
+                          </div>
+                        ) : (
+                          <div className="text-red-600 text-sm font-medium">Not provided</div>
+                        )}
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Insurance Provider
+                        </label>
+                        <div className="text-gray-900">{selectedClient.insurance}</div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Date Qualified
+                        </label>
+                        <div className="text-gray-900">
+                          {selectedClient.qualified_at 
+                            ? new Date(selectedClient.qualified_at).toLocaleDateString()
+                            : 'N/A'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Full Width Fields */}
+                  <div className="space-y-4 border-t pt-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Product Needed
@@ -709,6 +812,40 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                             </div>
                           ))}
                         </div>
+                      )}
+                    </div>
+
+                    {/* Generate Physician Order Button */}
+                    <div className="border-t pt-4">
+                      <button
+                        onClick={() => handleGeneratePhysicianOrder()}
+                        className="w-full bg-purple-600 hover:bg-purple-700 text-white py-3 px-4 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                        disabled={doctors.length === 0 || !selectedClient.address_line1 || !selectedClient.birthday || generatingPDF}
+                      >
+                        {generatingPDF ? (
+                          <>
+                            <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Generating...
+                          </>
+                        ) : (
+                          <>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                              <path fillRule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm5 6a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V8z" clipRule="evenodd" />
+                            </svg>
+                            Generate Physician Order
+                          </>
+                        )}
+                      </button>
+                      {(doctors.length === 0 || !selectedClient.address_line1 || !selectedClient.birthday) && (
+                        <p className="text-sm text-gray-500 mt-2 text-center">
+                          {doctors.length === 0 ? 'Add a doctor to generate physician order' : 
+                           !selectedClient.address_line1 && !selectedClient.birthday ? 'Patient address and DOB required' :
+                           !selectedClient.address_line1 ? 'Patient address required' :
+                           'Patient DOB required'}
+                        </p>
                       )}
                     </div>
 
@@ -1119,8 +1256,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
       {/* Edit Client Modal */}
       {showEditClientModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md my-8 max-h-[90vh] overflow-y-auto">
             <h3 className="text-xl font-bold text-gray-900 mb-4">Edit Client</h3>
             <form onSubmit={handleEditClient} className="space-y-4">
               <div>
@@ -1171,7 +1308,79 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
-              <div className="flex gap-3 justify-end">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Date of Birth
+                </label>
+                <input
+                  type="date"
+                  value={editForm.birthday}
+                  onChange={(e) => setEditForm({ ...editForm, birthday: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="border-t pt-4">
+                <h4 className="text-sm font-semibold text-gray-700 mb-3">Patient Address</h4>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Street Address
+                    </label>
+                    <input
+                      type="text"
+                      value={editForm.address_line1}
+                      onChange={(e) => setEditForm({ ...editForm, address_line1: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="123 Main St"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-6 gap-3">
+                    <div className="col-span-3">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        City
+                      </label>
+                      <input
+                        type="text"
+                        value={editForm.city}
+                        onChange={(e) => setEditForm({ ...editForm, city: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="City"
+                      />
+                    </div>
+                    <div className="col-span-1">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        State
+                      </label>
+                      <input
+                        type="text"
+                        value={editForm.state}
+                        onChange={(e) => setEditForm({ ...editForm, state: e.target.value.toUpperCase() })}
+                        maxLength="2"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="CA"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        ZIP Code
+                      </label>
+                      <input
+                        type="text"
+                        value={editForm.zip_code}
+                        onChange={(e) => setEditForm({ ...editForm, zip_code: e.target.value })}
+                        maxLength="10"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="12345"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-3 justify-end pt-4">
                 <button
                   type="button"
                   onClick={() => setShowEditClientModal(false)}
@@ -1187,6 +1396,65 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Doctor Selection Modal */}
+      {showDoctorSelectModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-xl font-bold text-gray-900 mb-4">Select Doctor</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Choose which doctor to use for the physician order:
+            </p>
+            <div className="space-y-3 max-h-96 overflow-y-auto mb-6">
+              {doctors.map((doctor) => (
+                <button
+                  key={doctor.id}
+                  onClick={() => handleGeneratePhysicianOrder(doctor)}
+                  disabled={generatingPDF}
+                  className="w-full text-left p-4 border-2 border-gray-200 rounded-lg hover:border-purple-500 hover:bg-purple-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <div className="font-semibold text-gray-900">{doctor.full_name}</div>
+                  <div className="text-sm text-gray-600 mt-1">
+                    <div>NPI: {doctor.npi_number}</div>
+                    {doctor.phone && <div>Phone: {doctor.phone}</div>}
+                    {doctor.fax && <div>Fax: {doctor.fax}</div>}
+                  </div>
+                </button>
+              ))}
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowDoctorSelectModal(false)}
+                disabled={generatingPDF}
+                className="px-4 py-2 text-gray-700 bg-gray-200 hover:bg-gray-300 rounded-md disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Success Modal */}
+      {showSuccessModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-8 w-full max-w-sm text-center shadow-xl">
+            <div className="mb-4">
+              <svg className="w-16 h-16 text-green-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+            </div>
+            <h3 className="text-2xl font-bold text-gray-900 mb-6">PHY Order Created!</h3>
+            <button
+              onClick={() => setShowSuccessModal(false)}
+              className="w-full bg-green-500 hover:bg-green-600 text-white font-semibold py-3 px-6 rounded-lg transition-colors"
+            >
+              OK
+            </button>
           </div>
         </div>
       )}

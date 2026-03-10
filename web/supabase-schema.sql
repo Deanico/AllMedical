@@ -17,6 +17,10 @@ CREATE TABLE leads (
   product_needed TEXT,
   date_shipped DATE,
   shipping_duration TEXT CHECK (shipping_duration IN ('1_month', '3_month')),
+  address_line1 TEXT,
+  city TEXT,
+  state TEXT,
+  zip_code TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
