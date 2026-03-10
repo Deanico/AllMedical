@@ -5,6 +5,7 @@ import reservoirImg from './assets/Medtronic_Resevoir.webp'
 import omnipodImg from './assets/omnipod.png'
 import './App.css'
 import { useState } from 'react'
+import { supabase } from './lib/supabaseClient'
 
 function App() {
   const [formData, setFormData] = useState({
@@ -32,6 +33,25 @@ function App() {
     setError('')
 
     try {
+      // Save to Supabase database
+      if (supabase) {
+        const { error: dbError } = await supabase
+          .from('leads')
+          .insert([{
+            name: formData.name,
+            email: formData.email,
+            phone: formData.phone,
+            insurance: formData.insurance,
+            notes: formData.notes,
+            stage: 'new'
+          }])
+
+        if (dbError) {
+          console.error('Database error:', dbError)
+          throw new Error('Failed to save lead')
+        }
+      }
+
       // Send SMS notification
       const response = await fetch('/api/send-sms', {
         method: 'POST',
@@ -42,7 +62,8 @@ function App() {
       })
 
       if (!response.ok) {
-        throw new Error('Failed to send message')
+        console.warn('SMS notification failed')
+        // Don't throw error - form submission still succeeded
       }
 
       setSubmitted(true)
