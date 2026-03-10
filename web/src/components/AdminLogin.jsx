@@ -8,6 +8,7 @@ const AUTHORIZED_USERS = [
 export default function AdminLogin({ onLogin }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [rememberMe, setRememberMe] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -22,8 +23,13 @@ export default function AdminLogin({ onLogin }) {
     )
 
     if (user) {
-      // Store in sessionStorage
-      sessionStorage.setItem('adminAuth', JSON.stringify({ email }))
+      // Store in localStorage (persistent) or sessionStorage (session only)
+      const authData = JSON.stringify({ email })
+      if (rememberMe) {
+        localStorage.setItem('adminAuth', authData)
+      } else {
+        sessionStorage.setItem('adminAuth', authData)
+      }
       onLogin(email)
     } else {
       setError('Invalid credentials')
@@ -74,6 +80,19 @@ export default function AdminLogin({ onLogin }) {
               className="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="••••••••"
             />
+          </div>
+
+          <div className="flex items-center">
+            <input
+              id="rememberMe"
+              type="checkbox"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+            />
+            <label htmlFor="rememberMe" className="ml-2 block text-sm text-gray-700">
+              Remember me
+            </label>
           </div>
 
           <button

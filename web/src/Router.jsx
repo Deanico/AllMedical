@@ -9,12 +9,14 @@ export default function Router() {
 
   // Check for existing admin session on load
   useEffect(() => {
-    const authData = sessionStorage.getItem('adminAuth')
+    // Check both localStorage (remember me) and sessionStorage
+    const authData = localStorage.getItem('adminAuth') || sessionStorage.getItem('adminAuth')
     if (authData) {
       try {
         const { email } = JSON.parse(authData)
         setAdminEmail(email)
       } catch (e) {
+        localStorage.removeItem('adminAuth')
         sessionStorage.removeItem('adminAuth')
       }
     }
@@ -56,6 +58,7 @@ export default function Router() {
   }
 
   const handleLogout = () => {
+    localStorage.removeItem('adminAuth')
     sessionStorage.removeItem('adminAuth')
     setAdminEmail(null)
     setView('public')

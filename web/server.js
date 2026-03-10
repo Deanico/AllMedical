@@ -4,6 +4,7 @@ import twilio from 'twilio'
 import dotenv from 'dotenv'
 import { google } from 'googleapis'
 import { createClient } from '@supabase/supabase-js'
+import https from 'https'
 
 dotenv.config()
 
@@ -162,6 +163,75 @@ app.post('/api/sync-google-sheets', async (req, res) => {
   } catch (error) {
     console.error('Sync error:', error)
     return res.status(500).json({ error: error.message || 'Failed to sync from Google Sheets' })
+  }
+})
+
+// NPPES Registry search endpoint (proxy to avoid CORS)
+app.get('/api/nppes-search', async (req, res) => {
+  try {
+    const searchQuery = req.query.q
+
+    if (!searchQuery) {
+      return res.status(400).json({ error: 'Search query is required' })
+    }
+
+    console.log('NPPES search for:', searchQuery)
+
+    // Determine if search is by NPI (numbers only) or by name
+    const isNPI = /^\d+$/.test(searchQuery.trim())
+    
+    let searchParam
+    if (isNPI) {
+      searchParam = `number=${encodeURIComponent(searchQuery)}`
+    } else {
+      // Try to split name into first and last
+      const nameParts = searchQuery.trim().split(/\s+/)
+      if (nameParts.length === 1) {
+        // Single word - search by first name only
+        searchParam = `first_name=${encodeURIComponent(nameParts[0])}`
+      } else {
+        // Multiple words - use first word as first name, rest as last name
+        const firstName = nameParts[0]
+        const lastName = nameParts.slice(1).join(' ')
+        searchParam = `first_name=${encodeURIComponent(firstName)}&last_name=${encodeURIComponent(lastName)}`
+      }
+    }
+
+    // Build NPPES API URL
+    const nppesUrl = `https://npiregistry.cms.hhs.gov/api/?version=2.1&${searchParam}&limit=10`
+
+    console.log('NPPES URL:', nppesUrl)
+
+    // Make request to NPPES API
+    https.get(nppesUrl, (nppesRes) => {
+      let data = ''
+
+      nppesRes.on('data', (chunk) => {
+        data += chunk
+      })
+
+      nppesRes.on('end', () => {
+        if (nppesRes.statusCode === 200) {
+          try {
+            const parsedData = JSON.parse(data)
+            res.status(200).json(parsedData)
+          } catch (e) {
+            console.error('Failed to parse NPPES response:', e)
+            res.status(500).json({ error: 'Failed to parse NPPES response' })
+          }
+        } else {
+          console.error('NPPES API returned status:', nppesRes.statusCode)
+          res.status(nppesRes.statusCode).json({ error: 'NPPES API error' })
+        }
+      })
+    }).on('error', (error) => {
+      console.error('NPPES request error:', error)
+      res.status(500).json({ error: 'Failed to connect to NPPES' })
+    })
+
+  } catch (error) {
+    console.error('NPPES search error:', error)
+    return res.status(500).json({ error: error.message || 'Failed to search NPPES' })
   }
 })
 

@@ -16,6 +16,7 @@ CREATE TABLE leads (
   qualified_at TIMESTAMP WITH TIME ZONE,
   product_needed TEXT,
   date_shipped DATE,
+  shipping_duration TEXT CHECK (shipping_duration IN ('1_month', '3_month')),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -57,6 +58,11 @@ CREATE TABLE IF NOT EXISTS doctors (
   full_name TEXT NOT NULL,
   fax TEXT NOT NULL,
   npi_number TEXT NOT NULL,
+  address_line1 TEXT,
+  city TEXT,
+  state TEXT,
+  zip_code TEXT,
+  phone TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
