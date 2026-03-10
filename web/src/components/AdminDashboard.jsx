@@ -32,6 +32,23 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const [showDoctorSelectModal, setShowDoctorSelectModal] = useState(false)
   const [generatingPDF, setGeneratingPDF] = useState(false)
   const [showSuccessModal, setShowSuccessModal] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [showAddLeadModal, setShowAddLeadModal] = useState(false)
+  const [addLeadForm, setAddLeadForm] = useState({ 
+    name: '', 
+    email: '', 
+    phone: '', 
+    insurance: '', 
+    birthday: '', 
+    address_line1: '', 
+    city: '', 
+    state: '', 
+    zip_code: '' 
+  })
+  const [showShippingModal, setShowShippingModal] = useState(false)
+  const [shippingClient, setShippingClient] = useState(null)
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth())
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
 
   useEffect(() => {
     fetchLeads()
@@ -281,6 +298,106 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     }
   }
 
+  const handleAddLead = async () => {
+    if (!supabase) return
+    
+    // Basic validation
+    if (!addLeadForm.name || !addLeadForm.email) {
+      alert('Please provide at least a name and email')
+      return
+    }
+
+    setUpdating(true)
+    try {
+      const { data, error } = await supabase
+        .from('leads')
+        .insert([{
+          name: addLeadForm.name,
+          email: addLeadForm.email,
+          phone: addLeadForm.phone || null,
+          insurance: addLeadForm.insurance || null,
+          birthday: addLeadForm.birthday || null,
+          address_line1: addLeadForm.address_line1 || null,
+          city: addLeadForm.city || null,
+          state: addLeadForm.state || null,
+          zip_code: addLeadForm.zip_code || null,
+          stage: 'new'
+        }])
+        .select()
+
+      if (error) throw error
+
+      // Refresh leads list
+      await fetchLeads()
+      
+      // Reset form and close modal
+      setAddLeadForm({ 
+        name: '', 
+        email: '', 
+        phone: '', 
+        insurance: '', 
+        birthday: '', 
+        address_line1: '', 
+        city: '', 
+        state: '', 
+        zip_code: '' 
+      })
+      setShowAddLeadModal(false)
+      
+      alert('Lead added successfully!')
+    } catch (error) {
+      console.error('Error adding lead:', error)
+      alert('Failed to add lead: ' + error.message)
+    } finally {
+      setUpdating(false)
+    }
+  }
+
+  const handleMarkShipped = async (duration) => {
+    if (!supabase || !shippingClient) return
+
+    setUpdating(true)
+    try {
+      // Calculate the new shipping date based on duration
+      const today = new Date()
+      let shippingDuration = '1_month'
+      
+      if (duration === 'end_of_month') {
+        // Calculate days until end of current month
+        const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0)
+        shippingDuration = 'end_of_month'
+      } else if (duration === '3_month') {
+        shippingDuration = '3_month'
+      } else {
+        shippingDuration = '1_month'
+      }
+
+      const { error } = await supabase
+        .from('leads')
+        .update({ 
+          date_shipped: today.toISOString().split('T')[0],
+          shipping_duration: shippingDuration
+        })
+        .eq('id', shippingClient.id)
+
+      if (error) throw error
+
+      // Refresh leads list
+      await fetchLeads()
+      
+      // Close modal
+      setShowShippingModal(false)
+      setShippingClient(null)
+      
+      alert('Shipment marked successfully!')
+    } catch (error) {
+      console.error('Error marking shipment:', error)
+      alert('Failed to mark shipment: ' + error.message)
+    } finally {
+      setUpdating(false)
+    }
+  }
+
   const handleGeneratePhysicianOrder = async (doctor = null) => {
     if (!selectedClient) return
 
@@ -301,7 +418,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       // Create filename with patient name and date
       const patientName = selectedClient.name.replace(/[^a-z0-9]/gi, '_')
       const dateStr = new Date().toISOString().split('T')[0]
-      const fileName = `Physician_Order_${patientName}_${dateStr}.docx`
+      const fileName = `Physician_Order_${patientName}_${dateStr}.pdf`
       
       // Download the document
       downloadPDF(docBlob, fileName)
@@ -408,7 +525,19 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     return colors[stage] || colors.new
   }
 
-  const allLeads = leads // Show ALL leads in Leads tab
+  // Filter leads based on search query
+  const filteredLeads = leads.filter(lead => {
+    if (!searchQuery) return true
+    const query = searchQuery.toLowerCase()
+    return (
+      lead.name?.toLowerCase().includes(query) ||
+      lead.email?.toLowerCase().includes(query) ||
+      lead.phone?.toLowerCase().includes(query) ||
+      lead.insurance?.toLowerCase().includes(query)
+    )
+  })
+
+  const allLeads = activeTab === 'leads' ? filteredLeads : leads // Show filtered leads in Leads tab
   const qualifiedLeads = leads.filter(lead => lead.stage === 'qualified')
 
   if (loading) {
@@ -470,12 +599,13 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                 : 'text-gray-600 hover:text-gray-800'
             }`}
           >
-            Leads ({allLeads.length})
+            Leads ({leads.length})
           </button>
           <button
             onClick={() => {
               setActiveTab('clients')
               setSelectedClient(null)
+              setSearchQuery('') // Clear search when switching tabs
             }}
             className={`px-6 py-3 font-semibold transition-colors ${
               activeTab === 'clients'
@@ -486,7 +616,10 @@ export default function AdminDashboard({ userEmail, onLogout }) {
             Clients ({qualifiedLeads.length})
           </button>
           <button
-            onClick={() => setActiveTab('calendar')}
+            onClick={() => {
+              setActiveTab('calendar')
+              setSearchQuery('') // Clear search when switching tabs
+            }}
             className={`px-6 py-3 font-semibold transition-colors ${
               activeTab === 'calendar'
                 ? 'text-blue-600 border-b-2 border-blue-600'
@@ -500,6 +633,24 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         {/* Leads Tab */}
         {activeTab === 'leads' && (
           <div className="bg-white rounded-lg shadow overflow-hidden">
+            {/* Search and Add Lead Controls */}
+            <div className="p-4 border-b border-gray-200 flex gap-3 items-center">
+              <div className="flex-1">
+                <input
+                  type="text"
+                  placeholder="Search leads by name, email, phone, or insurance..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+              <button
+                onClick={() => setShowAddLeadModal(true)}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold whitespace-nowrap"
+              >
+                + Add Lead
+              </button>
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full table-fixed">
                 <thead className="bg-gray-50 border-b border-gray-200">
@@ -873,7 +1024,62 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         {/* Calendar Tab */}
         {activeTab === 'calendar' && (
           <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-2xl font-bold text-gray-900 mb-6">Shipping Calendar</h2>
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold text-gray-900">Shipping Calendar</h2>
+              
+              {/* Month Navigation */}
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={() => {
+                    if (selectedMonth === 0) {
+                      setSelectedMonth(11)
+                      setSelectedYear(selectedYear - 1)
+                    } else {
+                      setSelectedMonth(selectedMonth - 1)
+                    }
+                  }}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  title="Previous month"
+                >
+                  <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path>
+                  </svg>
+                </button>
+                
+                <div className="text-center min-w-[200px]">
+                  <div className="text-xl font-bold text-gray-900">
+                    {new Date(selectedYear, selectedMonth).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                  </div>
+                </div>
+                
+                <button
+                  onClick={() => {
+                    if (selectedMonth === 11) {
+                      setSelectedMonth(0)
+                      setSelectedYear(selectedYear + 1)
+                    } else {
+                      setSelectedMonth(selectedMonth + 1)
+                    }
+                  }}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  title="Next month"
+                >
+                  <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path>
+                  </svg>
+                </button>
+                
+                <button
+                  onClick={() => {
+                    setSelectedMonth(new Date().getMonth())
+                    setSelectedYear(new Date().getFullYear())
+                  }}
+                  className="ml-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm font-semibold"
+                >
+                  Today
+                </button>
+              </div>
+            </div>
             
             {(() => {
               // Calculate upcoming shipping dates for clients with date_shipped and shipping_duration
@@ -907,15 +1113,24 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                 })
                 .sort((a, b) => a.nextShipDate - b.nextShipDate)
 
-              // Group shipments by month
-              const groupedByMonth = upcomingShipments.reduce((acc, shipment) => {
-                const monthKey = shipment.nextShipDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long' })
-                if (!acc[monthKey]) {
-                  acc[monthKey] = []
-                }
-                acc[monthKey].push(shipment)
-                return acc
-              }, {})
+              // Filter shipments for the selected month
+              const shipmentsInSelectedMonth = upcomingShipments.filter(shipment => {
+                const shipDate = shipment.nextShipDate
+                return shipDate.getMonth() === selectedMonth && shipDate.getFullYear() === selectedYear
+              })
+
+              // Calculate summary stats (for all upcoming shipments, not just selected month)
+              const today = new Date()
+              today.setHours(0, 0, 0, 0)
+              const overdue = upcomingShipments.filter(s => s.daysUntilShip < 0).length
+              const dueThisWeek = upcomingShipments.filter(s => s.daysUntilShip >= 0 && s.daysUntilShip <= 7).length
+              const dueThisMonth = upcomingShipments.filter(s => {
+                const currentMonth = today.getMonth()
+                const currentYear = today.getFullYear()
+                return s.nextShipDate.getMonth() === currentMonth && 
+                       s.nextShipDate.getFullYear() === currentYear &&
+                       s.daysUntilShip >= 0
+              }).length
 
               return (
                 <div className="space-y-8">
@@ -923,36 +1138,28 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                     <div className="bg-red-50 border border-red-200 rounded-lg p-4">
                       <div className="text-red-900 font-semibold text-sm mb-1">Overdue</div>
-                      <div className="text-3xl font-bold text-red-600">
-                        {upcomingShipments.filter(s => s.daysUntilShip < 0).length}
-                      </div>
+                      <div className="text-3xl font-bold text-red-600">{overdue}</div>
                     </div>
                     <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                       <div className="text-yellow-900 font-semibold text-sm mb-1">Due This Week</div>
-                      <div className="text-3xl font-bold text-yellow-600">
-                        {upcomingShipments.filter(s => s.daysUntilShip >= 0 && s.daysUntilShip <= 7).length}
-                      </div>
+                      <div className="text-3xl font-bold text-yellow-600">{dueThisWeek}</div>
                     </div>
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                       <div className="text-blue-900 font-semibold text-sm mb-1">Due This Month</div>
-                      <div className="text-3xl font-bold text-blue-600">
-                        {upcomingShipments.filter(s => s.daysUntilShip >= 0 && s.daysUntilShip <= 30).length}
-                      </div>
+                      <div className="text-3xl font-bold text-blue-600">{dueThisMonth}</div>
                     </div>
                   </div>
 
-                  {/* Calendar Grid by Month */}
-                  {upcomingShipments.length === 0 ? (
+                  {/* Calendar Grid for Selected Month */}
+                  {shipmentsInSelectedMonth.length === 0 ? (
                     <div className="text-center py-12 text-gray-500 border-2 border-dashed border-gray-300 rounded-lg">
-                      <p className="text-lg">No upcoming shipments scheduled.</p>
-                      <p className="text-sm mt-2">Add shipping dates and durations to clients to see them here.</p>
+                      <p className="text-lg">No shipments scheduled for this month.</p>
+                      <p className="text-sm mt-2">Use the navigation to view other months.</p>
                     </div>
                   ) : (
-                    Object.entries(groupedByMonth).map(([month, shipments]) => (
-                      <div key={month}>
-                        <h3 className="text-xl font-semibold text-gray-900 mb-4 border-b pb-2">{month}</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                          {shipments.map(shipment => {
+                    <div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {shipmentsInSelectedMonth.map(shipment => {
                             const isOverdue = shipment.daysUntilShip < 0
                             const isDueSoon = shipment.daysUntilShip >= 0 && shipment.daysUntilShip <= 7
                             
@@ -1016,13 +1223,22 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                                       {shipment.product_needed}
                                     </div>
                                   )}
-                                  <div className="mt-2 pt-2 border-t border-gray-200">
+                                  <div className="mt-3 pt-2 border-t border-gray-200 flex items-center justify-between">
                                     <span className="text-xs text-gray-500">
                                       {shipment.isFirstShipment 
                                         ? `${shipment.daysUntilShip} days until first shipment`
                                         : `${Math.abs(shipment.daysUntilShip)} days ${isOverdue ? 'overdue' : 'until due'}`
                                       }
                                     </span>
+                                    <button
+                                      onClick={() => {
+                                        setShippingClient(shipment)
+                                        setShowShippingModal(true)
+                                      }}
+                                      className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded font-semibold transition-colors"
+                                    >
+                                      ✓ Shipped
+                                    </button>
                                   </div>
                                 </div>
                               </div>
@@ -1030,7 +1246,6 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                           })}
                         </div>
                       </div>
-                    ))
                   )}
                 </div>
               )
@@ -1254,6 +1469,168 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         </div>
       )}
 
+      {/* Add Lead Modal */}
+      {showAddLeadModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md my-8 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-xl font-bold text-gray-900 mb-4">Add New Lead</h3>
+            <form onSubmit={(e) => { e.preventDefault(); handleAddLead(); }} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Full Name *
+                </label>
+                <input
+                  type="text"
+                  value={addLeadForm.name}
+                  onChange={(e) => setAddLeadForm({ ...addLeadForm, name: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="John Doe"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Email *
+                </label>
+                <input
+                  type="email"
+                  value={addLeadForm.email}
+                  onChange={(e) => setAddLeadForm({ ...addLeadForm, email: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="john@example.com"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Phone
+                </label>
+                <input
+                  type="tel"
+                  value={addLeadForm.phone}
+                  onChange={(e) => setAddLeadForm({ ...addLeadForm, phone: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="555-123-4567"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Insurance Provider
+                </label>
+                <input
+                  type="text"
+                  value={addLeadForm.insurance}
+                  onChange={(e) => setAddLeadForm({ ...addLeadForm, insurance: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Blue Cross"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Date of Birth
+                </label>
+                <input
+                  type="date"
+                  value={addLeadForm.birthday}
+                  onChange={(e) => setAddLeadForm({ ...addLeadForm, birthday: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              
+              <div className="border-t pt-4">
+                <h4 className="text-sm font-semibold text-gray-700 mb-3">Address (Optional)</h4>
+                
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Street Address
+                    </label>
+                    <input
+                      type="text"
+                      value={addLeadForm.address_line1}
+                      onChange={(e) => setAddLeadForm({ ...addLeadForm, address_line1: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="123 Main St"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-6 gap-3">
+                    <div className="col-span-3">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        City
+                      </label>
+                      <input
+                        type="text"
+                        value={addLeadForm.city}
+                        onChange={(e) => setAddLeadForm({ ...addLeadForm, city: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="City"
+                      />
+                    </div>
+                    <div className="col-span-1">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        State
+                      </label>
+                      <input
+                        type="text"
+                        value={addLeadForm.state}
+                        onChange={(e) => setAddLeadForm({ ...addLeadForm, state: e.target.value.toUpperCase() })}
+                        maxLength="2"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="CA"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        ZIP Code
+                      </label>
+                      <input
+                        type="text"
+                        value={addLeadForm.zip_code}
+                        onChange={(e) => setAddLeadForm({ ...addLeadForm, zip_code: e.target.value })}
+                        maxLength="10"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="12345"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-3 justify-end pt-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddLeadModal(false)
+                    setAddLeadForm({ 
+                      name: '', 
+                      email: '', 
+                      phone: '', 
+                      insurance: '', 
+                      birthday: '', 
+                      address_line1: '', 
+                      city: '', 
+                      state: '', 
+                      zip_code: '' 
+                    })
+                  }}
+                  className="px-4 py-2 text-gray-700 bg-gray-200 hover:bg-gray-300 rounded-md"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={updating}
+                  className="px-4 py-2 text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 rounded-md"
+                >
+                  {updating ? 'Adding...' : 'Add Lead'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Edit Client Modal */}
       {showEditClientModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
@@ -1455,6 +1832,51 @@ export default function AdminDashboard({ userEmail, onLogout }) {
             >
               OK
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Shipping Duration Modal */}
+      {showShippingModal && shippingClient && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md shadow-xl">
+            <h3 className="text-xl font-bold text-gray-900 mb-4">Mark as Shipped</h3>
+            <p className="text-gray-600 mb-6">
+              Confirm shipment for <span className="font-semibold">{shippingClient.name}</span>. How long until the next shipment?
+            </p>
+            <div className="space-y-3">
+              <button
+                onClick={() => handleMarkShipped('end_of_month')}
+                disabled={updating}
+                className="w-full bg-yellow-500 hover:bg-yellow-600 disabled:bg-gray-400 text-white font-semibold py-3 px-6 rounded-lg transition-colors"
+              >
+                Till End of Month
+              </button>
+              <button
+                onClick={() => handleMarkShipped('1_month')}
+                disabled={updating}
+                className="w-full bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white font-semibold py-3 px-6 rounded-lg transition-colors"
+              >
+                1 Month
+              </button>
+              <button
+                onClick={() => handleMarkShipped('3_month')}
+                disabled={updating}
+                className="w-full bg-purple-500 hover:bg-purple-600 disabled:bg-gray-400 text-white font-semibold py-3 px-6 rounded-lg transition-colors"
+              >
+                3 Months
+              </button>
+              <button
+                onClick={() => {
+                  setShowShippingModal(false)
+                  setShippingClient(null)
+                }}
+                disabled={updating}
+                className="w-full bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 text-gray-700 font-semibold py-3 px-6 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}
