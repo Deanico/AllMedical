@@ -53,13 +53,14 @@ export async function generatePhysicianOrder(patient, doctor) {
     const patientFirst = patientNameParts[0] || '';
     const patientLast = patientNameParts.slice(1).join(' ') || '';
     
-    // Parse doctor name into last name (excluding credentials)
+    // Parse doctor name into first and last name (excluding credentials)
     const doctorNameParts = (doctor.full_name || '').trim().split(/\s+/);
     // Remove common medical credentials from the end
     const credentials = ['MD', 'DO', 'NP', 'PA', 'FNP', 'RN', 'APRN', 'DNP', 'PHD', 'DPM', 'DDS', 'DMD'];
     const filteredParts = doctorNameParts.filter(part => 
       !credentials.includes(part.toUpperCase().replace(/[.,]/g, ''))
     );
+    const doctorFirst = filteredParts[0] || '';
     const doctorLast = filteredParts[filteredParts.length - 1] || '';
     
     // Format birthday
@@ -68,14 +69,22 @@ export async function generatePhysicianOrder(patient, doctor) {
       birthday = new Date(patient.birthday).toLocaleDateString('en-US');
     }
     
-    // Format city/state/zip
-    const cityStateZip = `${patient.city || ''}, ${patient.state || ''} ${patient.zip_code || ''}`;
+    // Format city/state/zip for patient and doctor
+    const patCityStateZip = `${patient.city || ''}, ${patient.state || ''} ${patient.zip_code || ''}`;
+    const phyCityStateZip = `${doctor.city || ''}, ${doctor.state || ''} ${doctor.zip_code || ''}`;
     
     // Prepare the data for template replacement (all uppercase)
     const templateData = {
+      Phy_First: doctorFirst.toUpperCase(),
       Phy_Last: doctorLast.toUpperCase(),
       Phy_Phone1: formatPhoneNumber(doctor.phone || ''),
       Phy_Phone2: formatPhoneNumber(doctor.fax || ''),
+      Phy_Address1: (doctor.address_line1 || '').toUpperCase(),
+      Phy_City: (doctor.city || '').toUpperCase(),
+      Phy_State: (doctor.state || '').toUpperCase(),
+      Phy_ZipCode: doctor.zip_code || '',
+      Phy_CityStateZip: phyCityStateZip.toUpperCase(),
+      Phy_NPI: doctor.npi_number || '',
       Pat_First: patientFirst.toUpperCase(),
       Pat_Last: patientLast.toUpperCase(),
       Pat_Birthday: birthday,
@@ -83,9 +92,14 @@ export async function generatePhysicianOrder(patient, doctor) {
       Pat_City: (patient.city || '').toUpperCase(),
       Pat_State: (patient.state || '').toUpperCase(),
       Pat_ZipCode: patient.zip_code || '',
-      Pat_CityStateZip: cityStateZip.toUpperCase(),
+      Pat_CityStateZip: patCityStateZip.toUpperCase(),
       Pat_Phone1: formatPhoneNumber(patient.phone || '')
     };
+    
+    // Debug logging
+    console.log('Patient data:', patient);
+    console.log('Doctor data:', doctor);
+    console.log('Template data being used:', templateData);
     
     // Fill in the template
     doc.render(templateData);
