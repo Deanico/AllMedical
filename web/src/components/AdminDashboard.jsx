@@ -21,7 +21,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     zip_code: '',
     phone: ''
   })
-  const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', insurance: '', birthday: '', address_line1: '', city: '', state: '', zip_code: '' })
+  const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', insurance: '', birthday: '', address_line1: '', city: '', state: '', zip_code: '', shipping_duration: '' })
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState(null)
   const [productNeeded, setProductNeeded] = useState('')
@@ -49,6 +49,22 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const [shippingClient, setShippingClient] = useState(null)
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth())
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
+  const [selectedCalcClient, setSelectedCalcClient] = useState(null)
+  const [editingCalculator, setEditingCalculator] = useState(false)
+  const [calcInputs, setCalcInputs] = useState({
+    deductible: '',
+    oopMax: '',
+    percentOfAllowable: '',
+    insurancePaidAmount: '',
+    costOfProduct: ''
+  })
+  const [clientCalcInputs, setClientCalcInputs] = useState({
+    deductible: '',
+    oopMax: '',
+    percentOfAllowable: '',
+    insurancePaidAmount: '',
+    costOfProduct: ''
+  })
 
   useEffect(() => {
     fetchLeads()
@@ -58,6 +74,18 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     if (selectedClient) {
       fetchDoctors(selectedClient.id)
       setProductNeeded(selectedClient.product_needed || '')
+      // Reset calculator editing state when switching clients
+      setEditingCalculator(false)
+      // Load calculator data if it exists
+      if (selectedClient.calc_deductible) {
+        setClientCalcInputs({
+          deductible: selectedClient.calc_deductible?.toString() || '',
+          oopMax: selectedClient.calc_oop_max?.toString() || '',
+          percentOfAllowable: selectedClient.calc_percent_allowable?.toString() || '',
+          insurancePaidAmount: selectedClient.calc_insurance_paid?.toString() || '',
+          costOfProduct: selectedClient.calc_product_cost?.toString() || ''
+        })
+      }
     }
     
     // Cleanup timer when client changes
@@ -398,6 +426,103 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     }
   }
 
+  const handleSaveCalculatorToPatient = async () => {
+    if (!supabase || !selectedCalcClient) {
+      alert('Please select a patient first')
+      return
+    }
+
+    setUpdating(true)
+    try {
+      const { error } = await supabase
+        .from('leads')
+        .update({
+          calc_deductible: parseFloat(calcInputs.deductible) || null,
+          calc_oop_max: parseFloat(calcInputs.oopMax) || null,
+          calc_percent_allowable: parseFloat(calcInputs.percentOfAllowable) || null,
+          calc_insurance_paid: parseFloat(calcInputs.insurancePaidAmount) || null,
+          calc_product_cost: parseFloat(calcInputs.costOfProduct) || null
+        })
+        .eq('id', selectedCalcClient.id)
+
+      if (error) throw error
+
+      // Refresh leads
+      await fetchLeads()
+      
+      alert('Calculator data saved to patient successfully!')
+    } catch (error) {
+      console.error('Error saving calculator data:', error)
+      alert('Failed to save calculator data: ' + error.message)
+    } finally {
+      setUpdating(false)
+    }
+  }
+
+  const handleLoadCalculatorFromPatient = (client) => {
+    setSelectedCalcClient(client)
+    if (client) {
+      setCalcInputs({
+        deductible: client.calc_deductible?.toString() || '',
+        oopMax: client.calc_oop_max?.toString() || '',
+        percentOfAllowable: client.calc_percent_allowable?.toString() || '',
+        insurancePaidAmount: client.calc_insurance_paid?.toString() || '',
+        costOfProduct: client.calc_product_cost?.toString() || ''
+      })
+    } else {
+      setCalcInputs({
+        deductible: '',
+        oopMax: '',
+        percentOfAllowable: '',
+        insurancePaidAmount: '',
+        costOfProduct: ''
+      })
+    }
+  }
+
+  const handleUpdateClientCalculator = async () => {
+    if (!supabase || !selectedClient) return
+
+    setUpdating(true)
+    try {
+      const { error } = await supabase
+        .from('leads')
+        .update({
+          calc_deductible: parseFloat(clientCalcInputs.deductible) || null,
+          calc_oop_max: parseFloat(clientCalcInputs.oopMax) || null,
+          calc_percent_allowable: parseFloat(clientCalcInputs.percentOfAllowable) || null,
+          calc_insurance_paid: parseFloat(clientCalcInputs.insurancePaidAmount) || null,
+          calc_product_cost: parseFloat(clientCalcInputs.costOfProduct) || null
+        })
+        .eq('id', selectedClient.id)
+
+      if (error) throw error
+
+      // Refresh leads and update selectedClient with new data
+      await fetchLeads()
+      
+      // Fetch updated client data
+      const { data: updatedClient, error: fetchError } = await supabase
+        .from('leads')
+        .select('*')
+        .eq('id', selectedClient.id)
+        .single()
+      
+      if (!fetchError && updatedClient) {
+        setSelectedClient(updatedClient)
+      }
+      
+      setEditingCalculator(false)
+      
+      alert('Calculator data updated successfully!')
+    } catch (error) {
+      console.error('Error updating calculator data:', error)
+      alert('Failed to update calculator data: ' + error.message)
+    } finally {
+      setUpdating(false)
+    }
+  }
+
   const handleGeneratePhysicianOrder = async (doctor = null) => {
     if (!selectedClient) return
 
@@ -452,7 +577,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
           address_line1: editForm.address_line1,
           city: editForm.city,
           state: editForm.state,
-          zip_code: editForm.zip_code
+          zip_code: editForm.zip_code,
+          shipping_duration: editForm.shipping_duration || null
         })
         .eq('id', selectedClient.id)
 
@@ -477,7 +603,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       address_line1: selectedClient.address_line1 || '',
       city: selectedClient.city || '',
       state: selectedClient.state || '',
-      zip_code: selectedClient.zip_code || ''
+      zip_code: selectedClient.zip_code || '',
+      shipping_duration: selectedClient.shipping_duration || ''
     })
     setShowEditClientModal(true)
   }
@@ -627,6 +754,32 @@ export default function AdminDashboard({ userEmail, onLogout }) {
             }`}
           >
             Calendar
+          </button>
+          <button
+            onClick={() => {
+              setActiveTab('calculator')
+              setSearchQuery('') // Clear search when switching tabs
+            }}
+            className={`px-6 py-3 font-semibold transition-colors ${
+              activeTab === 'calculator'
+                ? 'text-blue-600 border-b-2 border-blue-600'
+                : 'text-gray-600 hover:text-gray-800'
+            }`}
+          >
+            Payment Calculator
+          </button>
+          <button
+            onClick={() => {
+              setActiveTab('analytics')
+              setSearchQuery('') // Clear search when switching tabs
+            }}
+            className={`px-6 py-3 font-semibold transition-colors ${
+              activeTab === 'analytics'
+                ? 'text-blue-600 border-b-2 border-blue-600'
+                : 'text-gray-600 hover:text-gray-800'
+            }`}
+          >
+            Fun Stuff 🎉
           </button>
         </div>
 
@@ -906,6 +1059,202 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                       </div>
                     </div>
 
+                    {/* Payment Calculator Section */}
+                    <div className="border-t pt-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <label className="block text-sm font-medium text-gray-700">
+                          Insurance Payment Calculator
+                        </label>
+                        {selectedClient.calc_deductible && !editingCalculator ? (
+                          <button
+                            onClick={() => {
+                              setClientCalcInputs({
+                                deductible: selectedClient.calc_deductible?.toString() || '',
+                                oopMax: selectedClient.calc_oop_max?.toString() || '',
+                                percentOfAllowable: selectedClient.calc_percent_allowable?.toString() || '',
+                                insurancePaidAmount: selectedClient.calc_insurance_paid?.toString() || '',
+                                costOfProduct: selectedClient.calc_product_cost?.toString() || ''
+                              })
+                              setEditingCalculator(true)
+                            }}
+                            className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm"
+                          >
+                            Edit Calculator
+                          </button>
+                        ) : editingCalculator ? (
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => setEditingCalculator(false)}
+                              className="bg-gray-400 hover:bg-gray-500 text-white px-3 py-1 rounded text-sm"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onClick={handleUpdateClientCalculator}
+                              disabled={updating}
+                              className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm disabled:bg-gray-300"
+                            >
+                              {updating ? 'Saving...' : 'Save Changes'}
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+
+                      {selectedClient.calc_deductible && !editingCalculator ? (
+                        <div className="space-y-4">
+                          {/* Net Profit Display */}
+                          {(() => {
+                            const deductible = parseFloat(selectedClient.calc_deductible) || 0
+                            const oopMax = parseFloat(selectedClient.calc_oop_max) || 0
+                            const percentOfAllowable = parseFloat(selectedClient.calc_percent_allowable) || 0
+                            const insurancePaidAmount = parseFloat(selectedClient.calc_insurance_paid) || 0
+                            const costOfProduct = parseFloat(selectedClient.calc_product_cost) || 0
+
+                            // Calculate full allowable amount (what 100% would be)
+                            const fullAllowableAmount = percentOfAllowable > 0 
+                              ? insurancePaidAmount / (percentOfAllowable / 100)
+                              : insurancePaidAmount
+
+                            // Calculate patient portion per month (at current %)
+                            const patientPortionPerMonth = fullAllowableAmount - insurancePaidAmount
+
+                            // Year-long simulation
+                            let remainingDeductible = deductible
+                            let patientOOPTotal = 0
+                            let totalRevenue = 0
+
+                            for (let month = 1; month <= 12; month++) {
+                              let insurancePayment = insurancePaidAmount
+                              let patientPayment = patientPortionPerMonth
+
+                              // Check if OOP Max has been hit
+                              if (oopMax > 0 && patientOOPTotal >= oopMax) {
+                                // Insurance now pays 100%
+                                insurancePayment = fullAllowableAmount
+                                patientPayment = 0
+                              }
+
+                              // Track patient OOP
+                              patientOOPTotal += patientPayment
+
+                              // Apply insurance payment toward deductible first, then as revenue
+                              let monthRevenue = 0
+                              if (remainingDeductible > 0) {
+                                if (insurancePayment >= remainingDeductible) {
+                                  // Deductible fully met this month
+                                  monthRevenue = insurancePayment - remainingDeductible
+                                  remainingDeductible = 0
+                                } else {
+                                  // Deductible partially met
+                                  remainingDeductible -= insurancePayment
+                                  monthRevenue = 0
+                                }
+                              } else {
+                                // Deductible already met
+                                monthRevenue = insurancePayment
+                              }
+
+                              totalRevenue += monthRevenue
+                            }
+
+                            const netYearlyProfit = totalRevenue - (costOfProduct * 12)
+
+                            return (
+                              <div className="bg-gradient-to-r from-blue-50 to-green-50 p-6 rounded-lg border-2 border-blue-200">
+                                <div className="text-center">
+                                  <div className="text-sm font-medium text-gray-600 mb-2">Projected Net Yearly Profit</div>
+                                  <div className="text-4xl font-bold text-green-700">
+                                    ${netYearlyProfit.toFixed(2)}
+                                  </div>
+                                </div>
+                              </div>
+                            )
+                          })()}
+
+                          {/* Saved Calculator Inputs */}
+                          <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-lg">
+                            <div>
+                              <div className="text-xs font-medium text-gray-600">Deductible</div>
+                              <div className="text-sm text-gray-900">${selectedClient.calc_deductible}</div>
+                            </div>
+                            <div>
+                              <div className="text-xs font-medium text-gray-600">Out-of-Pocket Max</div>
+                              <div className="text-sm text-gray-900">${selectedClient.calc_oop_max || 'None'}</div>
+                            </div>
+                            <div>
+                              <div className="text-xs font-medium text-gray-600">Insurance Coverage %</div>
+                              <div className="text-sm text-gray-900">{selectedClient.calc_percent_allowable}%</div>
+                            </div>
+                            <div>
+                              <div className="text-xs font-medium text-gray-600">Insurance Monthly Payment</div>
+                              <div className="text-sm text-gray-900">${selectedClient.calc_insurance_paid}</div>
+                            </div>
+                            <div className="col-span-2">
+                              <div className="text-xs font-medium text-gray-600">Product Cost (Monthly)</div>
+                              <div className="text-sm text-gray-900">${selectedClient.calc_product_cost}</div>
+                            </div>
+                          </div>
+                        </div>
+                      ) : editingCalculator ? (
+                        <div className="space-y-4 bg-gray-50 p-4 rounded-lg">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Deductible ($)</label>
+                            <input
+                              type="number"
+                              value={clientCalcInputs.deductible}
+                              onChange={(e) => setClientCalcInputs({ ...clientCalcInputs, deductible: e.target.value })}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                              placeholder="1000"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Out-of-Pocket Max ($)</label>
+                            <input
+                              type="number"
+                              value={clientCalcInputs.oopMax}
+                              onChange={(e) => setClientCalcInputs({ ...clientCalcInputs, oopMax: e.target.value })}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                              placeholder="3000"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Insurance Coverage % (e.g., 80)</label>
+                            <input
+                              type="number"
+                              value={clientCalcInputs.percentOfAllowable}
+                              onChange={(e) => setClientCalcInputs({ ...clientCalcInputs, percentOfAllowable: e.target.value })}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                              placeholder="80"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Insurance Monthly Payment ($)</label>
+                            <input
+                              type="number"
+                              value={clientCalcInputs.insurancePaidAmount}
+                              onChange={(e) => setClientCalcInputs({ ...clientCalcInputs, insurancePaidAmount: e.target.value })}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                              placeholder="200"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Product Cost (Monthly) ($)</label>
+                            <input
+                              type="number"
+                              value={clientCalcInputs.costOfProduct}
+                              onChange={(e) => setClientCalcInputs({ ...clientCalcInputs, costOfProduct: e.target.value })}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                              placeholder="50"
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-sm text-gray-500 italic">
+                          No calculator data saved. Visit the Payment Calculator tab to add calculations for this patient.
+                        </div>
+                      )}
+                    </div>
+
                     {/* Doctors Section */}
                     <div className="border-t pt-4">
                       <div className="flex items-center justify-between mb-3">
@@ -1082,9 +1431,9 @@ export default function AdminDashboard({ userEmail, onLogout }) {
             </div>
             
             {(() => {
-              // Calculate upcoming shipping dates for clients with date_shipped and shipping_duration
+              // Calculate upcoming shipping dates for clients with date_shipped
               const upcomingShipments = qualifiedLeads
-                .filter(client => client.date_shipped && client.shipping_duration)
+                .filter(client => client.date_shipped)
                 .map(client => {
                   const shippedDate = new Date(client.date_shipped)
                   const today = new Date()
@@ -1098,10 +1447,15 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   if (shippedDateOnly >= today) {
                     nextShipDate = shippedDateOnly
                   } else {
-                    // If shipped date is in the past, calculate next shipment
-                    const monthsToAdd = client.shipping_duration === '3_month' ? 3 : 1
-                    nextShipDate = new Date(shippedDateOnly)
-                    nextShipDate.setMonth(nextShipDate.getMonth() + monthsToAdd)
+                    // If shipped date is in the past, calculate next shipment based on duration
+                    if (client.shipping_duration) {
+                      const monthsToAdd = client.shipping_duration === '3_month' ? 3 : 1
+                      nextShipDate = new Date(shippedDateOnly)
+                      nextShipDate.setMonth(nextShipDate.getMonth() + monthsToAdd)
+                    } else {
+                      // No duration set, don't show past dates without duration
+                      return null
+                    }
                   }
                   
                   return {
@@ -1111,6 +1465,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                     isFirstShipment: shippedDateOnly >= today
                   }
                 })
+                .filter(shipment => shipment !== null) // Remove null entries
                 .sort((a, b) => a.nextShipDate - b.nextShipDate)
 
               // Filter shipments for the selected month
@@ -1119,18 +1474,32 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                 return shipDate.getMonth() === selectedMonth && shipDate.getFullYear() === selectedYear
               })
 
-              // Calculate summary stats (for all upcoming shipments, not just selected month)
+              // Calculate summary stats relative to the selected month
               const today = new Date()
               today.setHours(0, 0, 0, 0)
-              const overdue = upcomingShipments.filter(s => s.daysUntilShip < 0).length
-              const dueThisWeek = upcomingShipments.filter(s => s.daysUntilShip >= 0 && s.daysUntilShip <= 7).length
-              const dueThisMonth = upcomingShipments.filter(s => {
-                const currentMonth = today.getMonth()
-                const currentYear = today.getFullYear()
-                return s.nextShipDate.getMonth() === currentMonth && 
-                       s.nextShipDate.getFullYear() === currentYear &&
-                       s.daysUntilShip >= 0
+              
+              // Create a date for the first day of the selected month
+              const selectedMonthStart = new Date(selectedYear, selectedMonth, 1)
+              selectedMonthStart.setHours(0, 0, 0, 0)
+              
+              // Create a date for the last day of the selected month
+              const selectedMonthEnd = new Date(selectedYear, selectedMonth + 1, 0)
+              selectedMonthEnd.setHours(23, 59, 59, 999)
+              
+              // Overdue: shipments before today (only if viewing current or past months)
+              const overdue = upcomingShipments.filter(s => {
+                return s.nextShipDate < today
               }).length
+              
+              // Due this week: shipments in the 7 days from today
+              const oneWeekFromNow = new Date(today)
+              oneWeekFromNow.setDate(oneWeekFromNow.getDate() + 7)
+              const dueThisWeek = upcomingShipments.filter(s => {
+                return s.nextShipDate >= today && s.nextShipDate <= oneWeekFromNow
+              }).length
+              
+              // Due this month: shipments in the selected month
+              const dueThisMonth = shipmentsInSelectedMonth.length
 
               return (
                 <div className="space-y-8">
@@ -1145,7 +1514,9 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                       <div className="text-3xl font-bold text-yellow-600">{dueThisWeek}</div>
                     </div>
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                      <div className="text-blue-900 font-semibold text-sm mb-1">Due This Month</div>
+                      <div className="text-blue-900 font-semibold text-sm mb-1">
+                        Due in {new Date(selectedYear, selectedMonth).toLocaleDateString('en-US', { month: 'long' })}
+                      </div>
                       <div className="text-3xl font-bold text-blue-600">{dueThisMonth}</div>
                     </div>
                   </div>
@@ -1213,10 +1584,13 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                                       })}
                                     </div>
                                   )}
-                                  <div className="text-gray-600">
-                                    <span className="font-medium">Duration:</span>{' '}
-                                    {shipment.shipping_duration === '3_month' ? '3 Months' : '1 Month'}
-                                  </div>
+                                  {shipment.shipping_duration && (
+                                    <div className="text-gray-600">
+                                      <span className="font-medium">Duration:</span>{' '}
+                                      {shipment.shipping_duration === 'end_of_month' ? 'Until End of Month' :
+                                       shipment.shipping_duration === '3_month' ? '3 Months' : '1 Month'}
+                                    </div>
+                                  )}
                                   {shipment.product_needed && (
                                     <div className="text-gray-600 mt-2 pt-2 border-t border-gray-200">
                                       <span className="font-medium">Product:</span>{' '}
@@ -1252,6 +1626,503 @@ export default function AdminDashboard({ userEmail, onLogout }) {
             })()}
           </div>
         )}
+
+        {/* Payment Calculator Tab */}
+        {activeTab === 'calculator' && (
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-2xl font-bold text-gray-900 mb-6">Insurance Payment Calculator</h2>
+            
+            {/* Patient Selector */}
+            <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+              <div className="flex items-center gap-4">
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Select Patient
+                  </label>
+                  <select
+                    value={selectedCalcClient?.id || ''}
+                    onChange={(e) => {
+                      const client = leads.find(l => l.id === e.target.value && l.stage === 'qualified')
+                      handleLoadCalculatorFromPatient(client || null)
+                    }}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">-- Select a patient to save calculations --</option>
+                    {leads
+                      .filter(lead => lead.stage === 'qualified')
+                      .sort((a, b) => a.name.localeCompare(b.name))
+                      .map(lead => (
+                        <option key={lead.id} value={lead.id}>
+                          {lead.name} {lead.insurance ? `(${lead.insurance})` : ''}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+                <div className="pt-7">
+                  <button
+                    onClick={handleSaveCalculatorToPatient}
+                    disabled={!selectedCalcClient || updating}
+                    className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {updating ? 'Saving...' : 'Save to Patient'}
+                  </button>
+                </div>
+              </div>
+              {selectedCalcClient && selectedCalcClient.calc_deductible && (
+                <div className="mt-3 text-sm text-green-600 flex items-center gap-2">
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                  </svg>
+                  Saved calculations loaded for this patient
+                </div>
+              )}
+            </div>
+            
+            <div className="grid md:grid-cols-2 gap-8">
+              {/* Input Section */}
+              <div className="space-y-6">
+                <h3 className="text-lg font-semibold text-gray-800 border-b pb-2">Input Parameters</h3>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Deductible ($)
+                  </label>
+                  <input
+                    type="number"
+                    value={calcInputs.deductible}
+                    onChange={(e) => setCalcInputs({ ...calcInputs, deductible: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="1000"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Amount patient must pay before insurance coverage begins</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Out-of-Pocket Max ($)
+                  </label>
+                  <input
+                    type="number"
+                    value={calcInputs.oopMax}
+                    onChange={(e) => setCalcInputs({ ...calcInputs, oopMax: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="3000"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Maximum patient pays; after this, insurance pays 100% (leave 0 for no max)</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    % of Allowable (Insurance Coverage)
+                  </label>
+                  <input
+                    type="number"
+                    value={calcInputs.percentOfAllowable}
+                    onChange={(e) => setCalcInputs({ ...calcInputs, percentOfAllowable: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="80"
+                    min="0"
+                    max="100"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Percentage insurance pays (e.g., 80 means insurance pays 80%)</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Insurance Paid Amount per Month ($)
+                  </label>
+                  <input
+                    type="number"
+                    value={calcInputs.insurancePaidAmount}
+                    onChange={(e) => setCalcInputs({ ...calcInputs, insurancePaidAmount: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="200"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Monthly payment received from insurance at current %</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Cost of Product per Month ($)
+                  </label>
+                  <input
+                    type="number"
+                    value={calcInputs.costOfProduct}
+                    onChange={(e) => setCalcInputs({ ...calcInputs, costOfProduct: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="50"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Your monthly cost to provide the product</p>
+                </div>
+              </div>
+
+              {/* Results Section */}
+              <div className="space-y-6">
+                <h3 className="text-lg font-semibold text-gray-800 border-b pb-2">Annual Profit Projection</h3>
+                
+                {(() => {
+                  // Parse inputs
+                  const deductible = parseFloat(calcInputs.deductible) || 0
+                  const oopMax = parseFloat(calcInputs.oopMax) || 0
+                  const percentOfAllowable = parseFloat(calcInputs.percentOfAllowable) || 0
+                  const insurancePaidAmount = parseFloat(calcInputs.insurancePaidAmount) || 0
+                  const costOfProduct = parseFloat(calcInputs.costOfProduct) || 0
+
+                  // Calculate full allowable amount (what 100% would be)
+                  const fullAllowableAmount = percentOfAllowable > 0 
+                    ? insurancePaidAmount / (percentOfAllowable / 100)
+                    : insurancePaidAmount
+
+                  // Calculate patient portion per month (at current %)
+                  const patientPortionPerMonth = fullAllowableAmount - insurancePaidAmount
+
+                  // Year-long simulation
+                  let remainingDeductible = deductible
+                  let patientOOPTotal = 0
+                  let totalRevenue = 0
+                  const monthlyBreakdown = []
+
+                  for (let month = 1; month <= 12; month++) {
+                    let insurancePayment = insurancePaidAmount
+                    let patientPayment = patientPortionPerMonth
+
+                    // Check if OOP Max has been hit
+                    if (oopMax > 0 && patientOOPTotal >= oopMax) {
+                      // Insurance now pays 100%
+                      insurancePayment = fullAllowableAmount
+                      patientPayment = 0
+                    }
+
+                    // Track patient OOP
+                    patientOOPTotal += patientPayment
+
+                    // Apply insurance payment toward deductible first, then as revenue
+                    let monthRevenue = 0
+                    if (remainingDeductible > 0) {
+                      if (insurancePayment >= remainingDeductible) {
+                        // Deductible fully met this month
+                        monthRevenue = insurancePayment - remainingDeductible
+                        remainingDeductible = 0
+                      } else {
+                        // Deductible partially met
+                        remainingDeductible -= insurancePayment
+                        monthRevenue = 0
+                      }
+                    } else {
+                      // Deductible already met
+                      monthRevenue = insurancePayment
+                    }
+
+                    totalRevenue += monthRevenue
+                    monthlyBreakdown.push({
+                      month,
+                      insurancePayment,
+                      patientPayment,
+                      monthRevenue,
+                      remainingDeductible: Math.max(0, remainingDeductible)
+                    })
+                  }
+
+                  const grossYearlyProfit = totalRevenue
+                  const netYearlyProfit = totalRevenue - (costOfProduct * 12)
+
+                  return (
+                    <>
+                      <div className="bg-green-50 border-2 border-green-500 rounded-lg p-6">
+                        <div className="text-sm font-medium text-green-900 mb-1">Gross Yearly Profit</div>
+                        <div className="text-4xl font-bold text-green-700">
+                          ${grossYearlyProfit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                        <div className="text-xs text-green-600 mt-2">Total revenue before product costs</div>
+                      </div>
+
+                      <div className="bg-blue-50 border-2 border-blue-500 rounded-lg p-6">
+                        <div className="text-sm font-medium text-blue-900 mb-1">Net Yearly Profit</div>
+                        <div className="text-4xl font-bold text-blue-700">
+                          ${netYearlyProfit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                        <div className="text-xs text-blue-600 mt-2">
+                          After ${(costOfProduct * 12).toLocaleString('en-US', { minimumFractionDigits: 2 })} product costs
+                        </div>
+                      </div>
+
+                      {/* Monthly Breakdown */}
+                      {insurancePaidAmount > 0 && (
+                        <div className="mt-6">
+                          <h4 className="text-sm font-semibold text-gray-800 mb-3">Monthly Breakdown</h4>
+                          <div className="max-h-96 overflow-y-auto border border-gray-200 rounded-lg">
+                            <table className="w-full text-xs">
+                              <thead className="bg-gray-50 sticky top-0">
+                                <tr>
+                                  <th className="px-2 py-2 text-left font-medium text-gray-700">Month</th>
+                                  <th className="px-2 py-2 text-right font-medium text-gray-700">Revenue</th>
+                                  <th className="px-2 py-2 text-right font-medium text-gray-700">Remaining Ded.</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-200">
+                                {monthlyBreakdown.map((m) => (
+                                  <tr key={m.month} className="hover:bg-gray-50">
+                                    <td className="px-2 py-2 text-gray-900">{m.month}</td>
+                                    <td className="px-2 py-2 text-right text-gray-900">
+                                      ${m.monthRevenue.toFixed(2)}
+                                    </td>
+                                    <td className="px-2 py-2 text-right text-gray-600">
+                                      ${m.remainingDeductible.toFixed(2)}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+
+                      {insurancePaidAmount === 0 && (
+                        <div className="text-center text-gray-500 py-12 border-2 border-dashed border-gray-300 rounded-lg">
+                          <p>Enter values to see profit projections</p>
+                        </div>
+                      )}
+                    </>
+                  )
+                })()}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Analytics Tab - Fun Stuff */}
+        {activeTab === 'analytics' && (() => {
+          // Calculate metrics from all qualified clients with calculator data
+          const clientsWithCalc = leads.filter(l => 
+            l.stage === 'qualified' && 
+            l.calc_deductible && 
+            l.calc_insurance_paid && 
+            l.calc_percent_allowable && 
+            l.calc_product_cost
+          )
+
+          const calculateClientProfit = (client) => {
+            const deductible = parseFloat(client.calc_deductible) || 0
+            const oopMax = parseFloat(client.calc_oop_max) || 0
+            const percentOfAllowable = parseFloat(client.calc_percent_allowable) || 0
+            const insurancePaidAmount = parseFloat(client.calc_insurance_paid) || 0
+            const costOfProduct = parseFloat(client.calc_product_cost) || 0
+
+            const fullAllowableAmount = percentOfAllowable > 0 
+              ? insurancePaidAmount / (percentOfAllowable / 100)
+              : insurancePaidAmount
+
+            const patientPortionPerMonth = fullAllowableAmount - insurancePaidAmount
+
+            let remainingDeductible = deductible
+            let patientOOPTotal = 0
+            let totalRevenue = 0
+
+            for (let month = 1; month <= 12; month++) {
+              let insurancePayment = insurancePaidAmount
+              let patientPayment = patientPortionPerMonth
+
+              if (oopMax > 0 && patientOOPTotal >= oopMax) {
+                insurancePayment = fullAllowableAmount
+                patientPayment = 0
+              }
+
+              patientOOPTotal += patientPayment
+
+              let monthRevenue = 0
+              if (remainingDeductible > 0) {
+                if (insurancePayment >= remainingDeductible) {
+                  monthRevenue = insurancePayment - remainingDeductible
+                  remainingDeductible = 0
+                } else {
+                  remainingDeductible -= insurancePayment
+                  monthRevenue = 0
+                }
+              } else {
+                monthRevenue = insurancePayment
+              }
+
+              totalRevenue += monthRevenue
+            }
+
+            const grossProfit = totalRevenue
+            const netProfit = totalRevenue - (costOfProduct * 12)
+            const totalCost = costOfProduct * 12
+
+            return { grossProfit, netProfit, totalCost }
+          }
+
+          // Calculate totals
+          const totals = clientsWithCalc.reduce((acc, client) => {
+            const { grossProfit, netProfit, totalCost } = calculateClientProfit(client)
+            acc.totalGrossRevenue += grossProfit
+            acc.totalNetProfit += netProfit
+            acc.totalCost += totalCost
+            return acc
+          }, { totalGrossRevenue: 0, totalNetProfit: 0, totalCost: 0 })
+
+          const avgProfitPerCustomer = clientsWithCalc.length > 0 
+            ? totals.totalNetProfit / clientsWithCalc.length 
+            : 0
+
+          const avgCostPerCustomer = clientsWithCalc.length > 0
+            ? totals.totalCost / clientsWithCalc.length
+            : 0
+
+          // Calculate by insurance company with flexible matching
+          const insuranceCompanies = [
+            { code: 'BCBS', patterns: ['BCBS', 'BLUE CROSS', 'BLUE SHIELD'] },
+            { code: 'UHC', patterns: ['UHC', 'UNITED HEALTH', 'UNITEDHEALTHCARE'] },
+            { code: 'Aetna', patterns: ['AETNA'] },
+            { code: 'Cigna', patterns: ['CIGNA'] },
+            { code: 'UMR', patterns: ['UMR'] },
+            { code: 'OTH_INSUR', patterns: ['OTH_INSUR', 'OTHER'] }
+          ]
+          
+          const insuranceStats = insuranceCompanies.map(({ code, patterns }) => {
+            const clients = clientsWithCalc.filter(c => {
+              if (!c.insurance) return false
+              const insuranceUpper = c.insurance.toUpperCase()
+              return patterns.some(pattern => insuranceUpper.includes(pattern))
+            })
+            
+            if (clients.length === 0) {
+              return { company: code, avgProfit: 0, count: 0 }
+            }
+
+            const totalProfit = clients.reduce((sum, client) => {
+              const { netProfit } = calculateClientProfit(client)
+              return sum + netProfit
+            }, 0)
+
+            return {
+              company: code,
+              avgProfit: totalProfit / clients.length,
+              count: clients.length
+            }
+          })
+
+          return (
+            <div className="space-y-6">
+              <div className="bg-white rounded-lg shadow p-6">
+                <h2 className="text-3xl font-bold text-gray-900 mb-8 flex items-center gap-3">
+                  <span>📊 Business Analytics</span>
+                </h2>
+
+                {/* Overall Stats */}
+                <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                  <div className="bg-gradient-to-br from-green-50 to-green-100 border-2 border-green-500 rounded-lg p-6">
+                    <div className="text-sm font-medium text-green-800 mb-2">💰 Total Gross Revenue</div>
+                    <div className="text-3xl font-bold text-green-700">
+                      ${totals.totalGrossRevenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div className="text-xs text-green-600 mt-2">{clientsWithCalc.length} customers</div>
+                  </div>
+
+                  <div className="bg-gradient-to-br from-blue-50 to-blue-100 border-2 border-blue-500 rounded-lg p-6">
+                    <div className="text-sm font-medium text-blue-800 mb-2">✨ Total Net Profit</div>
+                    <div className="text-3xl font-bold text-blue-700">
+                      ${totals.totalNetProfit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div className="text-xs text-blue-600 mt-2">After all costs</div>
+                  </div>
+
+                  <div className="bg-gradient-to-br from-purple-50 to-purple-100 border-2 border-purple-500 rounded-lg p-6">
+                    <div className="text-sm font-medium text-purple-800 mb-2">📈 Avg Profit/Customer</div>
+                    <div className="text-3xl font-bold text-purple-700">
+                      ${avgProfitPerCustomer.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div className="text-xs text-purple-600 mt-2">Per year</div>
+                  </div>
+
+                  <div className="bg-gradient-to-br from-orange-50 to-orange-100 border-2 border-orange-500 rounded-lg p-6">
+                    <div className="text-sm font-medium text-orange-800 mb-2">💸 Avg Cost/Customer</div>
+                    <div className="text-3xl font-bold text-orange-700">
+                      ${avgCostPerCustomer.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div className="text-xs text-orange-600 mt-2">Per year</div>
+                  </div>
+                </div>
+
+                {/* Insurance Company Breakdown */}
+                <div className="mt-8">
+                  <h3 className="text-xl font-bold text-gray-900 mb-4">🏥 Average Profit by Insurance Company</h3>
+                  <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {insuranceStats.map((stat) => (
+                      <div
+                        key={stat.company}
+                        className={`border-2 rounded-lg p-5 ${
+                          stat.count > 0
+                            ? 'bg-gradient-to-br from-indigo-50 to-indigo-100 border-indigo-400'
+                            : 'bg-gray-50 border-gray-300 opacity-60'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="text-lg font-bold text-gray-900">{stat.company}</div>
+                          <div className="text-xs bg-white px-2 py-1 rounded-full text-gray-600 font-medium">
+                            {stat.count} {stat.count === 1 ? 'client' : 'clients'}
+                          </div>
+                        </div>
+                        <div className={`text-2xl font-bold ${
+                          stat.count > 0 ? 'text-indigo-700' : 'text-gray-500'
+                        }`}>
+                          {stat.count > 0
+                            ? `$${stat.avgProfit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                            : 'No data'
+                          }
+                        </div>
+                        <div className="text-xs text-gray-600 mt-1">Avg profit per year</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {clientsWithCalc.length === 0 && (
+                  <div className="text-center py-12 text-gray-500">
+                    <div className="text-6xl mb-4">📊</div>
+                    <p className="text-xl font-semibold">No calculator data yet</p>
+                    <p className="text-sm mt-2">Add calculator data to clients to see analytics</p>
+                  </div>
+                )}
+
+                {/* Debug Section - Show which clients need calculator data */}
+                {(() => {
+                  const qualifiedClients = leads.filter(l => l.stage === 'qualified')
+                  const clientsWithoutCalc = qualifiedClients.filter(c => 
+                    !c.calc_deductible || !c.calc_insurance_paid || !c.calc_percent_allowable || !c.calc_product_cost
+                  )
+                  
+                  if (clientsWithoutCalc.length > 0) {
+                    return (
+                      <div className="mt-8 border-t pt-6">
+                        <h3 className="text-lg font-semibold text-gray-700 mb-3">
+                          ⚠️ Clients Missing Calculator Data ({clientsWithoutCalc.length})
+                        </h3>
+                        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                          <p className="text-sm text-yellow-800 mb-3">
+                            These clients won't appear in the analytics until you add calculator data:
+                          </p>
+                          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-2">
+                            {clientsWithoutCalc.map(client => (
+                              <div key={client.id} className="text-sm bg-white border border-yellow-300 rounded px-3 py-2">
+                                <div className="font-medium text-gray-900">{client.name}</div>
+                                <div className="text-xs text-gray-600">{client.insurance || 'No insurance listed'}</div>
+                              </div>
+                            ))}
+                          </div>
+                          <p className="text-xs text-yellow-700 mt-3">
+                            💡 Tip: Go to the Clients tab, select a client, and add their calculator data
+                          </p>
+                        </div>
+                      </div>
+                    )
+                  }
+                  return null
+                })()}
+              </div>
+            </div>
+          )
+        })()}
       </div>
 
       {/* Add Doctor Modal */}
@@ -1754,6 +2625,100 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                       />
                     </div>
                   </div>
+                </div>
+              </div>
+
+              <div className="border-t pt-4">
+                <h4 className="text-sm font-semibold text-gray-700 mb-3">Shipping Schedule</h4>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Shipping Duration
+                  </label>
+                  <div className="space-y-2">
+                    <label className="flex items-center">
+                      <input
+                        type="radio"
+                        name="shipping_duration"
+                        value=""
+                        checked={editForm.shipping_duration === ''}
+                        onChange={(e) => setEditForm({ ...editForm, shipping_duration: e.target.value })}
+                        className="mr-2"
+                      />
+                      <span className="text-sm text-gray-700">None</span>
+                    </label>
+                    <label className="flex items-center">
+                      <input
+                        type="radio"
+                        name="shipping_duration"
+                        value="end_of_month"
+                        checked={editForm.shipping_duration === 'end_of_month'}
+                        onChange={(e) => setEditForm({ ...editForm, shipping_duration: e.target.value })}
+                        className="mr-2"
+                      />
+                      <span className="text-sm text-gray-700">Until End of Month</span>
+                    </label>
+                    <label className="flex items-center">
+                      <input
+                        type="radio"
+                        name="shipping_duration"
+                        value="1_month"
+                        checked={editForm.shipping_duration === '1_month'}
+                        onChange={(e) => setEditForm({ ...editForm, shipping_duration: e.target.value })}
+                        className="mr-2"
+                      />
+                      <span className="text-sm text-gray-700">1 Month</span>
+                    </label>
+                    <label className="flex items-center">
+                      <input
+                        type="radio"
+                        name="shipping_duration"
+                        value="3_month"
+                        checked={editForm.shipping_duration === '3_month'}
+                        onChange={(e) => setEditForm({ ...editForm, shipping_duration: e.target.value })}
+                        className="mr-2"
+                      />
+                      <span className="text-sm text-gray-700">3 Months</span>
+                    </label>
+                  </div>
+                  
+                  {/* Display Next Shipment Date */}
+                  {selectedClient?.date_shipped && (
+                    <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                      <div className="text-sm font-medium text-blue-900 mb-1">Next Shipment Date:</div>
+                      <div className="text-lg font-bold text-blue-700">
+                        {(() => {
+                          const shippedDate = new Date(selectedClient.date_shipped)
+                          const today = new Date()
+                          today.setHours(0, 0, 0, 0)
+                          const shippedDateOnly = new Date(shippedDate)
+                          shippedDateOnly.setHours(0, 0, 0, 0)
+                          
+                          let nextShipDate
+                          
+                          // If the shipped date is in the future or today, use it as the next ship date
+                          if (shippedDateOnly >= today) {
+                            nextShipDate = shippedDateOnly
+                          } else if (editForm.shipping_duration) {
+                            // If shipped date is in the past, calculate next shipment based on duration
+                            const monthsToAdd = editForm.shipping_duration === '3_month' ? 3 : 1
+                            nextShipDate = new Date(shippedDateOnly)
+                            nextShipDate.setMonth(nextShipDate.getMonth() + monthsToAdd)
+                          } else {
+                            // No duration set and date is in the past
+                            return <span className="text-gray-600">No future shipment scheduled</span>
+                          }
+                          
+                          return nextShipDate.toLocaleDateString('en-US', { 
+                            weekday: 'short',
+                            month: 'short', 
+                            day: 'numeric', 
+                            year: 'numeric' 
+                          })
+                        })()}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
