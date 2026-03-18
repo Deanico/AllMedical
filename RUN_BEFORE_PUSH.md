@@ -34,7 +34,24 @@ You've added new features that require database changes. Run these SQL scripts i
 
 ---
 
-## ✅ After Running Both Scripts
+## 3️⃣ Backfill Existing Physician Orders (Optional - One Time)
+
+**File:** `web/backfill-physician-orders-generated.sql`
+
+**What it does:** Sets "Generated" date for clients who already have physician orders (excludes Royle, Jamie, Kaitlyn, John Morgan)
+
+**How to run:**
+1. Go to Supabase Dashboard → SQL Editor
+2. Click "New Query"
+3. Copy and paste the contents of `web/backfill-physician-orders-generated.sql`
+4. Click "Run"
+5. Review the results table to verify
+
+**Note:** Only run this ONCE! It updates existing clients to show physician orders were generated today.
+
+---
+
+## ✅ After Running All Scripts
 
 You're ready to push! The new features will work:
 - **Physician Order Workflow:** Track when orders are generated, sent, and received
