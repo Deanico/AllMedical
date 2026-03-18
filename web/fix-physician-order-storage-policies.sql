@@ -1,14 +1,12 @@
--- Create storage bucket for physician orders
-INSERT INTO storage.buckets (id, name, public) 
-VALUES ('physician-orders', 'physician-orders', true)
-ON CONFLICT (id) DO NOTHING;
+-- Fix storage policies for physician orders bucket
+-- Run this to fix the upload permission error
 
--- Drop existing policies if they exist
+-- Drop existing policies
 DROP POLICY IF EXISTS "Allow authenticated uploads" ON storage.objects;
 DROP POLICY IF EXISTS "Allow public downloads" ON storage.objects;
 DROP POLICY IF EXISTS "Allow authenticated deletes" ON storage.objects;
 
--- Set up storage policies to allow authenticated users to upload and view files
+-- Recreate policies with correct permissions
 CREATE POLICY "Allow authenticated uploads" ON storage.objects
 FOR INSERT TO authenticated
 WITH CHECK (bucket_id = 'physician-orders');
@@ -20,3 +18,15 @@ USING (bucket_id = 'physician-orders');
 CREATE POLICY "Allow authenticated deletes" ON storage.objects
 FOR DELETE TO authenticated
 USING (bucket_id = 'physician-orders');
+
+-- Verify policies were created
+SELECT 
+  schemaname,
+  tablename,
+  policyname,
+  permissive,
+  roles,
+  cmd
+FROM pg_policies 
+WHERE tablename = 'objects' 
+  AND policyname LIKE '%physician%';
