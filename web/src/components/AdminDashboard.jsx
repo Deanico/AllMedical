@@ -19,6 +19,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState(false)
   const [showAddDrModal, setShowAddDrModal] = useState(false)
+  const [showEditDrModal, setShowEditDrModal] = useState(false)
+  const [editingDoctor, setEditingDoctor] = useState(null)
   const [showEditClientModal, setShowEditClientModal] = useState(false)
   const [drForm, setDrForm] = useState({ 
     full_name: '', 
@@ -323,6 +325,68 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     }
   }
 
+  const handleEditDoctor = (doctor) => {
+    setEditingDoctor(doctor)
+    setDrForm({
+      full_name: doctor.full_name || '',
+      first_name: doctor.first_name || '',
+      last_name: doctor.last_name || '',
+      fax: doctor.fax || '',
+      npi_number: doctor.npi_number || '',
+      address_line1: doctor.address_line1 || '',
+      city: doctor.city || '',
+      state: doctor.state || '',
+      zip_code: doctor.zip_code || '',
+      phone: doctor.phone || ''
+    })
+    setShowEditDrModal(true)
+  }
+
+  const handleUpdateDoctor = async (e) => {
+    e.preventDefault()
+    if (!supabase || !editingDoctor) return
+
+    try {
+      const { error } = await supabase
+        .from('doctors')
+        .update({
+          full_name: drForm.full_name,
+          first_name: drForm.first_name,
+          last_name: drForm.last_name,
+          fax: drForm.fax,
+          npi_number: drForm.npi_number,
+          address_line1: drForm.address_line1,
+          city: drForm.city,
+          state: drForm.state,
+          zip_code: drForm.zip_code,
+          phone: drForm.phone
+        })
+        .eq('id', editingDoctor.id)
+
+      if (error) throw error
+      
+      setDrForm({ 
+        full_name: '', 
+        first_name: '',
+        last_name: '',
+        fax: '', 
+        npi_number: '',
+        address_line1: '',
+        city: '',
+        state: '',
+        zip_code: '',
+        phone: ''
+      })
+      setShowEditDrModal(false)
+      setEditingDoctor(null)
+      await fetchDoctors(selectedClient.id)
+      alert('Doctor information updated successfully!')
+    } catch (error) {
+      console.error('Error updating doctor:', error)
+      alert('Failed to update doctor')
+    }
+  }
+
   const handleDeleteDoctor = async (doctorId) => {
     if (!supabase || !selectedClient) return
     
@@ -569,6 +633,23 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       // Download the document
       downloadPDF(docBlob, fileName)
       
+      // Update database to track that physician order was generated
+      if (supabase) {
+        await supabase
+          .from('leads')
+          .update({ 
+            physician_order_generated_at: new Date().toISOString()
+          })
+          .eq('id', selectedClient.id)
+        
+        // Update local state
+        setSelectedClient({
+          ...selectedClient,
+          physician_order_generated_at: new Date().toISOString()
+        })
+        await fetchLeads()
+      }
+      
       // Close modal if open
       setShowDoctorSelectModal(false)
       
@@ -645,6 +726,112 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       shipping_duration: selectedClient.shipping_duration || ''
     })
     setShowEditClientModal(true)
+  }
+
+  const handleMarkPhysicianOrderSent = async () => {
+    if (!supabase || !selectedClient) return
+    
+    try {
+      const { error } = await supabase
+        .from('leads')
+        .update({ physician_order_sent_at: new Date().toISOString() })
+        .eq('id', selectedClient.id)
+      
+      if (error) throw error
+      
+      setSelectedClient({
+        ...selectedClient,
+        physician_order_sent_at: new Date().toISOString()
+      })
+      await fetchLeads()
+    } catch (error) {
+      console.error('Error marking physician order as sent:', error)
+      alert('Failed to update status')
+    }
+  }
+
+  const handlePhysicianOrderFileUpload = async (event) => {
+    const file = event.target.files?.[0]
+    if (!file || !supabase || !selectedClient) return
+
+    // Check file size (max 10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      alert('File size must be less than 10MB')
+      return
+    }
+
+    try {
+      setUpdating(true)
+
+      // Upload file to Supabase Storage
+      const fileExt = file.name.split('.').pop()
+      const fileName = `${selectedClient.id}_${Date.now()}.${fileExt}`
+      const filePath = `${fileName}`
+
+      const { data: uploadData, error: uploadError } = await supabase
+        .storage
+        .from('physician-orders')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: false
+        })
+
+      if (uploadError) throw uploadError
+
+      // Get public URL
+      const { data: { publicUrl } } = supabase
+        .storage
+        .from('physician-orders')
+        .getPublicUrl(filePath)
+
+      // Update database with file URL and received timestamp
+      const { error: updateError } = await supabase
+        .from('leads')
+        .update({ 
+          physician_order_file_url: publicUrl,
+          physician_order_received_at: new Date().toISOString()
+        })
+        .eq('id', selectedClient.id)
+
+      if (updateError) throw updateError
+
+      setSelectedClient({
+        ...selectedClient,
+        physician_order_file_url: publicUrl,
+        physician_order_received_at: new Date().toISOString()
+      })
+      await fetchLeads()
+      alert('Signed physician order uploaded successfully!')
+    } catch (error) {
+      console.error('Error uploading physician order:', error)
+      alert('Failed to upload file: ' + error.message)
+    } finally {
+      setUpdating(false)
+      // Reset file input
+      event.target.value = ''
+    }
+  }
+
+  const handleMarkPhysicianOrderReceived = async () => {
+    if (!supabase || !selectedClient) return
+    
+    try {
+      const { error } = await supabase
+        .from('leads')
+        .update({ physician_order_received_at: new Date().toISOString() })
+        .eq('id', selectedClient.id)
+      
+      if (error) throw error
+      
+      setSelectedClient({
+        ...selectedClient,
+        physician_order_received_at: new Date().toISOString()
+      })
+      await fetchLeads()
+    } catch (error) {
+      console.error('Error marking physician order as received:', error)
+      alert('Failed to update status')
+    }
   }
 
   const handleSyncFromSheets = async () => {
@@ -1383,16 +1570,27 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                         <div className="space-y-3">
                           {doctors.map((doctor) => (
                             <div key={doctor.id} className="bg-gray-50 p-4 rounded-lg border border-gray-200 relative">
-                              <button
-                                onClick={() => handleDeleteDoctor(doctor.id)}
-                                className="absolute top-3 right-3 text-red-600 hover:text-red-800 hover:bg-red-50 p-2 rounded-full transition-colors"
-                                title="Delete doctor"
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                                  <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-                                </svg>
-                              </button>
-                              <div className="font-semibold text-gray-900 text-lg mb-2 pr-8">{doctor.full_name}</div>
+                              <div className="absolute top-3 right-3 flex gap-2">
+                                <button
+                                  onClick={() => handleEditDoctor(doctor)}
+                                  className="text-blue-600 hover:text-blue-800 hover:bg-blue-50 p-2 rounded-full transition-colors"
+                                  title="Edit doctor"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                    <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                                  </svg>
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteDoctor(doctor.id)}
+                                  className="text-red-600 hover:text-red-800 hover:bg-red-50 p-2 rounded-full transition-colors"
+                                  title="Delete doctor"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                                  </svg>
+                                </button>
+                              </div>
+                              <div className="font-semibold text-gray-900 text-lg mb-2 pr-20">{doctor.full_name}</div>
                               <div className="grid grid-cols-2 gap-2 text-sm">
                                 <div className="text-gray-600">
                                   <span className="font-medium">NPI:</span> {doctor.npi_number}
@@ -1426,6 +1624,131 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
                     {/* Generate Physician Order Button */}
                     <div className="border-t pt-4">
+                      {/* Physician Order Status Workflow */}
+                      {selectedClient.physician_order_generated_at && (
+                        <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                          <h4 className="font-semibold text-blue-900 mb-3 flex items-center gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                              <path fillRule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm5 6a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V8z" clipRule="evenodd" />
+                            </svg>
+                            Physician Order Status
+                          </h4>
+                          
+                          <div className="space-y-3">
+                            {/* Generated */}
+                            <div className="flex items-center gap-3">
+                              <div className="flex-shrink-0 w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
+                                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
+                                </svg>
+                              </div>
+                              <div className="flex-1">
+                                <div className="font-medium text-gray-900">Generated</div>
+                                <div className="text-sm text-gray-600">
+                                  {formatDate(selectedClient.physician_order_generated_at)}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Sent */}
+                            <div className="flex items-center gap-3">
+                              <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center ${
+                                selectedClient.physician_order_sent_at 
+                                  ? 'bg-green-500' 
+                                  : 'bg-gray-300'
+                              }`}>
+                                {selectedClient.physician_order_sent_at ? (
+                                  <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
+                                  </svg>
+                                ) : (
+                                  <div className="w-2 h-2 bg-white rounded-full"></div>
+                                )}
+                              </div>
+                              <div className="flex-1">
+                                <div className="font-medium text-gray-900">Sent to Doctor</div>
+                                {selectedClient.physician_order_sent_at ? (
+                                  <div className="text-sm text-gray-600">
+                                    {formatDate(selectedClient.physician_order_sent_at)}
+                                  </div>
+                                ) : (
+                                  <button
+                                    onClick={handleMarkPhysicianOrderSent}
+                                    className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                                  >
+                                    Mark as Sent
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Received */}
+                            <div className="flex items-center gap-3">
+                              <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center ${
+                                selectedClient.physician_order_received_at 
+                                  ? 'bg-green-500' 
+                                  : 'bg-gray-300'
+                              }`}>
+                                {selectedClient.physician_order_received_at ? (
+                                  <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
+                                  </svg>
+                                ) : (
+                                  <div className="w-2 h-2 bg-white rounded-full"></div>
+                                )}
+                              </div>
+                              <div className="flex-1">
+                                <div className="font-medium text-gray-900">Received Signed</div>
+                                {selectedClient.physician_order_received_at ? (
+                                  <div className="text-sm text-gray-600">
+                                    {formatDate(selectedClient.physician_order_received_at)}
+                                    {selectedClient.physician_order_file_url && (
+                                      <div className="mt-1">
+                                        <a 
+                                          href={selectedClient.physician_order_file_url} 
+                                          target="_blank" 
+                                          rel="noopener noreferrer"
+                                          className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium"
+                                        >
+                                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                            <path fillRule="evenodd" d="M8 4a3 3 0 00-3 3v4a5 5 0 0010 0V7a1 1 0 112 0v4a7 7 0 11-14 0V7a5 5 0 0110 0v4a3 3 0 11-6 0V7a1 1 0 012 0v4a1 1 0 102 0V7a3 3 0 00-3-3z" clipRule="evenodd" />
+                                          </svg>
+                                          View Signed Order
+                                        </a>
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : selectedClient.physician_order_sent_at ? (
+                                  <div>
+                                    <label className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded cursor-pointer font-medium transition-colors">
+                                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                                      </svg>
+                                      Upload Signed Order
+                                      <input 
+                                        type="file" 
+                                        onChange={handlePhysicianOrderFileUpload}
+                                        accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                                        className="hidden"
+                                        disabled={updating}
+                                      />
+                                    </label>
+                                    <button
+                                      onClick={handleMarkPhysicianOrderReceived}
+                                      className="ml-2 text-sm text-gray-600 hover:text-gray-800 underline"
+                                    >
+                                      Mark received without file
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="text-sm text-gray-500">Send first to mark as received</div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       <button
                         onClick={() => handleGeneratePhysicianOrder()}
                         className="w-full bg-purple-600 hover:bg-purple-700 text-white py-3 px-4 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 disabled:bg-gray-400 disabled:cursor-not-allowed"
@@ -1444,7 +1767,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                               <path fillRule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm5 6a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V8z" clipRule="evenodd" />
                             </svg>
-                            Generate Physician Order
+                            {selectedClient.physician_order_generated_at ? 'Regenerate Physician Order' : 'Generate Physician Order'}
                           </>
                         )}
                       </button>
@@ -2229,6 +2552,164 @@ export default function AdminDashboard({ userEmail, onLogout }) {
           )
         })()}
       </div>
+
+      {/* Edit Doctor Modal */}
+      {showEditDrModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg p-6 w-full max-w-2xl my-8 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-xl font-bold text-gray-900 mb-4">Edit Doctor</h3>
+            
+            <form onSubmit={handleUpdateDoctor} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Full Name *
+                </label>
+                <input
+                  type="text"
+                  value={drForm.full_name}
+                  onChange={(e) => setDrForm({ ...drForm, full_name: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Dr. John Smith"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    NPI Number *
+                  </label>
+                  <input
+                    type="text"
+                    value={drForm.npi_number}
+                    onChange={(e) => setDrForm({ ...drForm, npi_number: e.target.value })}
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="1234567890"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Phone
+                  </label>
+                  <input
+                    type="text"
+                    value={drForm.phone}
+                    onChange={(e) => setDrForm({ ...drForm, phone: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="555-123-4567"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Fax Number *
+                </label>
+                <input
+                  type="text"
+                  value={drForm.fax}
+                  onChange={(e) => setDrForm({ ...drForm, fax: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="555-123-4567"
+                />
+              </div>
+
+              <div className="border-t pt-4">
+                <h4 className="text-sm font-semibold text-gray-700 mb-3">Practice Address</h4>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Street Address
+                    </label>
+                    <input
+                      type="text"
+                      value={drForm.address_line1}
+                      onChange={(e) => setDrForm({ ...drForm, address_line1: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="123 Medical Center Dr"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-6 gap-3">
+                    <div className="col-span-3">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        City
+                      </label>
+                      <input
+                        type="text"
+                        value={drForm.city}
+                        onChange={(e) => setDrForm({ ...drForm, city: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="City"
+                      />
+                    </div>
+                    <div className="col-span-1">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        State
+                      </label>
+                      <input
+                        type="text"
+                        value={drForm.state}
+                        onChange={(e) => setDrForm({ ...drForm, state: e.target.value.toUpperCase() })}
+                        maxLength="2"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="CA"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        ZIP Code
+                      </label>
+                      <input
+                        type="text"
+                        value={drForm.zip_code}
+                        onChange={(e) => setDrForm({ ...drForm, zip_code: e.target.value })}
+                        maxLength="10"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="12345"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-3 justify-end pt-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditDrModal(false)
+                    setEditingDoctor(null)
+                    setDrForm({ 
+                      full_name: '', 
+                      first_name: '',
+                      last_name: '',
+                      fax: '', 
+                      npi_number: '',
+                      address_line1: '',
+                      city: '',
+                      state: '',
+                      zip_code: '',
+                      phone: ''
+                    })
+                  }}
+                  className="px-4 py-2 text-gray-700 bg-gray-200 hover:bg-gray-300 rounded-md"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 text-white bg-blue-600 hover:bg-blue-700 rounded-md"
+                >
+                  Update Doctor
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Add Doctor Modal */}
       {showAddDrModal && (

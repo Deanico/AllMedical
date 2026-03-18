@@ -38,6 +38,29 @@ function formatDate(dateString) {
 }
 
 /**
+ * Cleans a name by removing credentials and extra punctuation
+ * @param {string} name - Name string that may contain credentials
+ * @returns {string} - Cleaned name without credentials
+ */
+function cleanName(name) {
+  if (!name) return '';
+  
+  // List of common medical credentials to remove
+  const credentials = ['MD', 'DO', 'NP', 'PA', 'FNP', 'RN', 'APRN', 'DNP', 'PHD', 'DPM', 'DDS', 'DMD', 'PHARMD'];
+  
+  // Split by comma to remove credentials that appear after commas
+  let cleanedName = name.split(',')[0].trim();
+  
+  // Remove any credentials that appear as separate words
+  const words = cleanedName.split(/\s+/);
+  const filteredWords = words.filter(word => 
+    !credentials.includes(word.toUpperCase().replace(/[.,]/g, ''))
+  );
+  
+  return filteredWords.join(' ').trim();
+}
+
+/**
  * Generates a physician order document by filling in the Word template
  * @param {Object} patient - Patient information
  * @param {Object} doctor - Doctor information
@@ -68,8 +91,8 @@ export async function generatePhysicianOrder(patient, doctor) {
     
     // Use structured first and last name from NPPES data
     // Falls back to parsing full_name if first/last not available (for legacy data)
-    let doctorFirst = doctor.first_name || '';
-    let doctorLast = doctor.last_name || '';
+    let doctorFirst = cleanName(doctor.first_name || '');
+    let doctorLast = cleanName(doctor.last_name || '');
     
     // Fallback for legacy records without first_name/last_name
     if (!doctorFirst && !doctorLast && doctor.full_name) {
