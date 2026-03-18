@@ -2,6 +2,15 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { generatePhysicianOrder, downloadPDF } from '../lib/generatePhysicianOrder'
 
+// Helper function to format date without timezone issues
+const formatDate = (dateString) => {
+  if (!dateString) return ''
+  // Parse YYYY-MM-DD format directly without timezone conversion
+  const [year, month, day] = dateString.split('T')[0].split('-')
+  const date = new Date(year, month - 1, day)
+  return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+}
+
 export default function AdminDashboard({ userEmail, onLogout }) {
   const [activeTab, setActiveTab] = useState('leads')
   const [leads, setLeads] = useState([])
@@ -13,6 +22,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const [showEditClientModal, setShowEditClientModal] = useState(false)
   const [drForm, setDrForm] = useState({ 
     full_name: '', 
+    first_name: '',
+    last_name: '',
     fax: '', 
     npi_number: '',
     address_line1: '',
@@ -51,6 +62,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
   const [selectedCalcClient, setSelectedCalcClient] = useState(null)
   const [editingCalculator, setEditingCalculator] = useState(false)
+  const [showMobileDetails, setShowMobileDetails] = useState(false)
   const [calcInputs, setCalcInputs] = useState({
     deductible: '',
     oopMax: '',
@@ -243,7 +255,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     const fax = address.fax_number || ''
     const phone = address.telephone_number || ''
     
-    // Format name
+    // Get structured name data from NPPES
     const firstName = result.basic?.first_name || ''
     const lastName = result.basic?.last_name || ''
     const credential = result.basic?.credential || ''
@@ -251,6 +263,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     
     setDrForm({
       full_name: fullName.trim(),
+      first_name: firstName,
+      last_name: lastName,
       fax: fax,
       npi_number: result.number || '',
       address_line1: address.address_1 || '',
@@ -274,6 +288,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         .insert([{
           client_id: selectedClient.id,
           full_name: drForm.full_name,
+          first_name: drForm.first_name,
+          last_name: drForm.last_name,
           fax: drForm.fax,
           npi_number: drForm.npi_number,
           address_line1: drForm.address_line1,
@@ -287,6 +303,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       
       setDrForm({ 
         full_name: '', 
+        first_name: '',
+        last_name: '',
         fax: '', 
         npi_number: '',
         address_line1: '',
@@ -594,12 +612,17 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   }
 
   const openEditModal = () => {
+    // Normalize birthday to YYYY-MM-DD format for date input
+    const birthdayValue = selectedClient.birthday 
+      ? selectedClient.birthday.split('T')[0] 
+      : '';
+    
     setEditForm({
       name: selectedClient.name,
       email: selectedClient.email,
       phone: selectedClient.phone,
       insurance: selectedClient.insurance,
-      birthday: selectedClient.birthday || '',
+      birthday: birthdayValue,
       address_line1: selectedClient.address_line1 || '',
       city: selectedClient.city || '',
       state: selectedClient.state || '',
@@ -679,23 +702,25 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white shadow">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-blue-900">Admin Dashboard</h1>
-          <div className="flex items-center gap-4">
-            <button
-              onClick={handleSyncFromSheets}
-              disabled={syncing}
-              className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white px-4 py-2 rounded-md text-sm font-medium"
-            >
-              {syncing ? 'Syncing...' : '↻ Sync from Google Sheets'}
-            </button>
-            <span className="text-gray-600 text-sm">{userEmail}</span>
-            <button
-              onClick={onLogout}
-              className="bg-gray-200 hover:bg-gray-300 text-gray-800 px-4 py-2 rounded-md text-sm"
-            >
-              Logout
-            </button>
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 py-3 sm:py-4">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+            <h1 className="text-xl sm:text-2xl font-bold text-blue-900">Admin Dashboard</h1>
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4">
+              <button
+                onClick={handleSyncFromSheets}
+                disabled={syncing}
+                className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white px-3 sm:px-4 py-2 rounded-md text-xs sm:text-sm font-medium w-full sm:w-auto"
+              >
+                {syncing ? 'Syncing...' : '↻ Sync from Google Sheets'}
+              </button>
+              <span className="text-gray-600 text-xs sm:text-sm hidden sm:inline">{userEmail}</span>
+              <button
+                onClick={onLogout}
+                className="bg-gray-200 hover:bg-gray-300 text-gray-800 px-3 sm:px-4 py-2 rounded-md text-xs sm:text-sm w-full sm:w-auto"
+              >
+                Logout
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -716,11 +741,11 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       )}
 
       {/* Tabs */}
-      <div className="max-w-7xl mx-auto px-4 py-6">
-        <div className="flex gap-4 mb-6 border-b border-gray-200">
+      <div className="max-w-7xl mx-auto px-2 sm:px-4 py-4 sm:py-6">
+        <div className="flex gap-2 sm:gap-4 mb-6 border-b border-gray-200 overflow-x-auto">
           <button
             onClick={() => setActiveTab('leads')}
-            className={`px-6 py-3 font-semibold transition-colors ${
+            className={`px-3 sm:px-6 py-2 sm:py-3 font-semibold transition-colors whitespace-nowrap text-sm sm:text-base ${
               activeTab === 'leads'
                 ? 'text-blue-600 border-b-2 border-blue-600'
                 : 'text-gray-600 hover:text-gray-800'
@@ -732,9 +757,10 @@ export default function AdminDashboard({ userEmail, onLogout }) {
             onClick={() => {
               setActiveTab('clients')
               setSelectedClient(null)
+              setShowMobileDetails(false)
               setSearchQuery('') // Clear search when switching tabs
             }}
-            className={`px-6 py-3 font-semibold transition-colors ${
+            className={`px-3 sm:px-6 py-2 sm:py-3 font-semibold transition-colors whitespace-nowrap text-sm sm:text-base ${
               activeTab === 'clients'
                 ? 'text-blue-600 border-b-2 border-blue-600'
                 : 'text-gray-600 hover:text-gray-800'
@@ -747,7 +773,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
               setActiveTab('calendar')
               setSearchQuery('') // Clear search when switching tabs
             }}
-            className={`px-6 py-3 font-semibold transition-colors ${
+            className={`px-3 sm:px-6 py-2 sm:py-3 font-semibold transition-colors whitespace-nowrap text-sm sm:text-base ${
               activeTab === 'calendar'
                 ? 'text-blue-600 border-b-2 border-blue-600'
                 : 'text-gray-600 hover:text-gray-800'
@@ -760,26 +786,28 @@ export default function AdminDashboard({ userEmail, onLogout }) {
               setActiveTab('calculator')
               setSearchQuery('') // Clear search when switching tabs
             }}
-            className={`px-6 py-3 font-semibold transition-colors ${
+            className={`px-3 sm:px-6 py-2 sm:py-3 font-semibold transition-colors whitespace-nowrap text-sm sm:text-base ${
               activeTab === 'calculator'
                 ? 'text-blue-600 border-b-2 border-blue-600'
                 : 'text-gray-600 hover:text-gray-800'
             }`}
           >
-            Payment Calculator
+            <span className="hidden sm:inline">Payment Calculator</span>
+            <span className="sm:hidden">Calculator</span>
           </button>
           <button
             onClick={() => {
               setActiveTab('analytics')
               setSearchQuery('') // Clear search when switching tabs
             }}
-            className={`px-6 py-3 font-semibold transition-colors ${
+            className={`px-3 sm:px-6 py-2 sm:py-3 font-semibold transition-colors whitespace-nowrap text-sm sm:text-base ${
               activeTab === 'analytics'
                 ? 'text-blue-600 border-b-2 border-blue-600'
                 : 'text-gray-600 hover:text-gray-800'
             }`}
           >
-            Fun Stuff 🎉
+            <span className="hidden sm:inline">Fun Stuff 🎉</span>
+            <span className="sm:hidden">Analytics</span>
           </button>
         </div>
 
@@ -787,24 +815,26 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         {activeTab === 'leads' && (
           <div className="bg-white rounded-lg shadow overflow-hidden">
             {/* Search and Add Lead Controls */}
-            <div className="p-4 border-b border-gray-200 flex gap-3 items-center">
+            <div className="p-3 sm:p-4 border-b border-gray-200 flex flex-col sm:flex-row gap-2 sm:gap-3">
               <div className="flex-1">
                 <input
                   type="text"
-                  placeholder="Search leads by name, email, phone, or insurance..."
+                  placeholder="Search leads..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
               <button
                 onClick={() => setShowAddLeadModal(true)}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold whitespace-nowrap"
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold text-sm sm:text-base whitespace-nowrap w-full sm:w-auto"
               >
                 + Add Lead
               </button>
             </div>
-            <div className="overflow-x-auto">
+            
+            {/* Desktop Table View */}
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full table-fixed">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
@@ -867,16 +897,69 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                 </tbody>
               </table>
             </div>
+            
+            {/* Mobile Card View */}
+            <div className="md:hidden divide-y divide-gray-200">
+              {allLeads.length === 0 ? (
+                <div className="px-4 py-8 text-center text-gray-500">
+                  No leads yet
+                </div>
+              ) : (
+                allLeads.map((lead) => (
+                  <div key={lead.id} className="p-4 hover:bg-gray-50">
+                    <div className="space-y-3">
+                      <div className="flex justify-between items-start">
+                        <div className="font-semibold text-gray-900 text-base">
+                          {lead.name}
+                        </div>
+                        <select
+                          value={lead.stage}
+                          onChange={(e) => updateStage(lead.id, e.target.value)}
+                          disabled={updating}
+                          className={`px-2 py-1 rounded-full text-xs font-semibold ${getStageColor(lead.stage)} border-0 cursor-pointer`}
+                        >
+                          <option value="new">New</option>
+                          <option value="called">Called</option>
+                          <option value="reached">Reached</option>
+                          <option value="unqualified">Unqualified</option>
+                          <option value="qualified">Qualified</option>
+                        </select>
+                      </div>
+                      
+                      <a 
+                        href={`tel:${lead.phone}`} 
+                        className="block text-blue-600 font-medium text-base"
+                      >
+                        📞 {lead.phone}
+                      </a>
+                      
+                      <a 
+                        href={`mailto:${lead.email}`}
+                        className="block text-gray-600 text-sm truncate"
+                      >
+                        {lead.email}
+                      </a>
+                      
+                      {lead.insurance && (
+                        <div className="text-sm text-gray-600">
+                          <span className="font-medium">Insurance:</span> {lead.insurance}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         )}
 
         {/* Clients Tab */}
         {activeTab === 'clients' && (
-          <div className="grid md:grid-cols-2 gap-6">
+          <div className="grid md:grid-cols-2 gap-4 sm:gap-6">
             {/* Clients List */}
-            <div className="bg-white rounded-lg shadow">
-              <div className="p-4 border-b border-gray-200">
-                <h2 className="text-lg font-semibold text-gray-900">Client List</h2>
+            <div className={`bg-white rounded-lg shadow ${showMobileDetails ? 'hidden md:block' : 'block'}`}>
+              <div className="p-3 sm:p-4 border-b border-gray-200">
+                <h2 className="text-base sm:text-lg font-semibold text-gray-900">Client List</h2>
               </div>
               <div className="divide-y divide-gray-200 max-h-[600px] overflow-y-auto">
                 {qualifiedLeads.length === 0 ? (
@@ -887,22 +970,25 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   qualifiedLeads.map((client) => (
                     <div
                       key={client.id}
-                      onClick={() => setSelectedClient(client)}
-                      className={`p-4 cursor-pointer hover:bg-gray-50 transition-colors ${
+                      onClick={() => {
+                        setSelectedClient(client)
+                        setShowMobileDetails(true)
+                      }}
+                      className={`p-3 sm:p-4 cursor-pointer hover:bg-gray-50 transition-colors ${
                         selectedClient?.id === client.id ? 'bg-blue-50' : ''
                       }`}
                     >
-                      <div className="font-semibold text-gray-900">
+                      <div className="font-semibold text-gray-900 text-sm sm:text-base">
                         {client.name}
                         {(!client.address_line1 || !client.birthday) && (
-                          <span className="ml-2 text-red-600 text-sm font-medium">
+                          <span className="ml-2 text-red-600 text-xs sm:text-sm font-medium block sm:inline mt-1 sm:mt-0">
                             {!client.address_line1 && !client.birthday ? 'Address & DOB Needed!' : 
                              !client.address_line1 ? 'Address Needed!' : 'DOB Needed!'}
                           </span>
                         )}
                       </div>
-                      <div className="text-sm text-gray-600">{client.email}</div>
-                      <div className="text-sm text-gray-600">{client.phone}</div>
+                      <div className="text-xs sm:text-sm text-gray-600">{client.email}</div>
+                      <div className="text-xs sm:text-sm text-gray-600">{client.phone}</div>
                     </div>
                   ))
                 )}
@@ -910,49 +996,57 @@ export default function AdminDashboard({ userEmail, onLogout }) {
             </div>
 
             {/* Client Details */}
-            <div className="bg-white rounded-lg shadow">
-              <div className="p-4 border-b border-gray-200">
-                <h2 className="text-lg font-semibold text-gray-900">Client Details</h2>
+            <div className={`bg-white rounded-lg shadow ${!showMobileDetails ? 'hidden md:block' : 'block'}`}>
+              <div className="p-3 sm:p-4 border-b border-gray-200 flex items-center gap-2">
+                <button
+                  onClick={() => setShowMobileDetails(false)}
+                  className="md:hidden text-gray-600 hover:text-gray-900 p-1"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
+                  </svg>
+                </button>
+                <h2 className="text-base sm:text-lg font-semibold text-gray-900">Client Details</h2>
               </div>
               {selectedClient ? (
-                <div className="p-6 space-y-6">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-xl font-bold text-gray-900">
+                <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-h-[calc(100vh-200px)] overflow-y-auto">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <h3 className="text-lg sm:text-xl font-bold text-gray-900">
                       {selectedClient.name}
                     </h3>
                     <button
                       onClick={openEditModal}
-                      className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm"
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm"
                     >
                       Edit
                     </button>
                   </div>
 
                   {/* Two Column Layout for Basic Info */}
-                  <div className="grid md:grid-cols-2 gap-6">
+                  <div className="grid md:grid-cols-2 gap-4 sm:gap-6">
                     {/* Left Column - Contact & Address */}
-                    <div className="space-y-4">
+                    <div className="space-y-3 sm:space-y-4">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                        <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
                           Email
                         </label>
-                        <div className="text-gray-900">{selectedClient.email}</div>
+                        <div className="text-sm sm:text-base text-gray-900 break-words">{selectedClient.email}</div>
                       </div>
 
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                        <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
                           Phone
                         </label>
-                        <div className="text-gray-900">{selectedClient.phone}</div>
+                        <div className="text-sm sm:text-base text-gray-900">{selectedClient.phone}</div>
                       </div>
 
                       {/* Patient Address */}
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                        <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
                           Patient Address
                         </label>
                         {selectedClient.address_line1 ? (
-                          <div className="text-gray-900">
+                          <div className="text-sm sm:text-base text-gray-900">
                             <div>{selectedClient.address_line1}</div>
                             {(selectedClient.city || selectedClient.state || selectedClient.zip_code) && (
                               <div>
@@ -962,40 +1056,40 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                             )}
                           </div>
                         ) : (
-                          <div className="text-red-600 text-sm font-medium">Not provided</div>
+                          <div className="text-red-600 text-xs sm:text-sm font-medium">Not provided</div>
                         )}
                       </div>
                     </div>
 
                     {/* Right Column - Business Info */}
-                    <div className="space-y-4">
+                    <div className="space-y-3 sm:space-y-4">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                        <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
                           Date of Birth
                         </label>
                         {selectedClient.birthday ? (
-                          <div className="text-gray-900">
-                            {new Date(selectedClient.birthday).toLocaleDateString()}
+                          <div className="text-sm sm:text-base text-gray-900">
+                            {formatDate(selectedClient.birthday)}
                           </div>
                         ) : (
-                          <div className="text-red-600 text-sm font-medium">Not provided</div>
+                          <div className="text-red-600 text-xs sm:text-sm font-medium">Not provided</div>
                         )}
                       </div>
 
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                        <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
                           Insurance Provider
                         </label>
-                        <div className="text-gray-900">{selectedClient.insurance}</div>
+                        <div className="text-sm sm:text-base text-gray-900">{selectedClient.insurance}</div>
                       </div>
 
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                        <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
                           Date Qualified
                         </label>
                         <div className="text-gray-900">
                           {selectedClient.qualified_at 
-                            ? new Date(selectedClient.qualified_at).toLocaleDateString()
+                            ? formatDate(selectedClient.qualified_at)
                             : 'N/A'}
                         </div>
                       </div>
@@ -1362,7 +1456,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   </div>
                 </div>
               ) : (
-                <div className="p-8 text-center text-gray-500">
+                <div className="p-8 text-center text-gray-500 hidden md:block">
                   Select a client to view details
                 </div>
               )}
@@ -1372,12 +1466,12 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
         {/* Calendar Tab */}
         {activeTab === 'calendar' && (
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold text-gray-900">Shipping Calendar</h2>
+          <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 sm:mb-6 gap-3">
+              <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Shipping Calendar</h2>
               
               {/* Month Navigation */}
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 sm:gap-4 w-full sm:w-auto justify-between sm:justify-end">
                 <button
                   onClick={() => {
                     if (selectedMonth === 0) {
@@ -1387,16 +1481,16 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                       setSelectedMonth(selectedMonth - 1)
                     }
                   }}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  className="p-1.5 sm:p-2 hover:bg-gray-100 rounded-lg transition-colors"
                   title="Previous month"
                 >
-                  <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-5 h-5 sm:w-6 sm:h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path>
                   </svg>
                 </button>
                 
-                <div className="text-center min-w-[200px]">
-                  <div className="text-xl font-bold text-gray-900">
+                <div className="text-center flex-1 sm:min-w-[200px]">
+                  <div className="text-base sm:text-xl font-bold text-gray-900">
                     {new Date(selectedYear, selectedMonth).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
                   </div>
                 </div>
@@ -1577,11 +1671,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                                   {!shipment.isFirstShipment && (
                                     <div className="text-gray-600">
                                       <span className="font-medium">Last Shipped:</span>{' '}
-                                      {new Date(shipment.date_shipped).toLocaleDateString('en-US', { 
-                                        month: 'numeric', 
-                                        day: 'numeric', 
-                                        year: 'numeric' 
-                                      })}
+                                      {formatDate(shipment.date_shipped)}
                                     </div>
                                   )}
                                   {shipment.shipping_duration && (
@@ -1629,14 +1719,14 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
         {/* Payment Calculator Tab */}
         {activeTab === 'calculator' && (
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-2xl font-bold text-gray-900 mb-6">Insurance Payment Calculator</h2>
+          <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+            <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-4 sm:mb-6">Insurance Payment Calculator</h2>
             
             {/* Patient Selector */}
-            <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
-              <div className="flex items-center gap-4">
-                <div className="flex-1">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+            <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-gray-50 rounded-lg border border-gray-200">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
+                <div className="flex-1 w-full">
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2">
                     Select Patient
                   </label>
                   <select
@@ -1645,7 +1735,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                       const client = leads.find(l => l.id === e.target.value && l.stage === 'qualified')
                       handleLoadCalculatorFromPatient(client || null)
                     }}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full px-3 sm:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base"
                   >
                     <option value="">-- Select a patient to save calculations --</option>
                     {leads
@@ -1658,11 +1748,11 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                       ))}
                   </select>
                 </div>
-                <div className="pt-7">
+                <div className="w-full sm:w-auto sm:pt-7">
                   <button
                     onClick={handleSaveCalculatorToPatient}
                     disabled={!selectedCalcClient || updating}
-                    className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                    className="w-full sm:w-auto px-4 sm:px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors text-sm sm:text-base"
                   >
                     {updating ? 'Saving...' : 'Save to Patient'}
                   </button>
@@ -1678,41 +1768,41 @@ export default function AdminDashboard({ userEmail, onLogout }) {
               )}
             </div>
             
-            <div className="grid md:grid-cols-2 gap-8">
+            <div className="grid md:grid-cols-2 gap-4 sm:gap-8">
               {/* Input Section */}
-              <div className="space-y-6">
-                <h3 className="text-lg font-semibold text-gray-800 border-b pb-2">Input Parameters</h3>
+              <div className="space-y-4 sm:space-y-6">
+                <h3 className="text-base sm:text-lg font-semibold text-gray-800 border-b pb-2">Input Parameters</h3>
                 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2">
                     Deductible ($)
                   </label>
                   <input
                     type="number"
                     value={calcInputs.deductible}
                     onChange={(e) => setCalcInputs({ ...calcInputs, deductible: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full px-3 sm:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base"
                     placeholder="1000"
                   />
                   <p className="text-xs text-gray-500 mt-1">Amount patient must pay before insurance coverage begins</p>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2">
                     Out-of-Pocket Max ($)
                   </label>
                   <input
                     type="number"
                     value={calcInputs.oopMax}
                     onChange={(e) => setCalcInputs({ ...calcInputs, oopMax: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full px-3 sm:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base"
                     placeholder="3000"
                   />
                   <p className="text-xs text-gray-500 mt-1">Maximum patient pays; after this, insurance pays 100% (leave 0 for no max)</p>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2">
                     % of Allowable (Insurance Coverage)
                   </label>
                   <input
@@ -2003,33 +2093,33 @@ export default function AdminDashboard({ userEmail, onLogout }) {
           })
 
           return (
-            <div className="space-y-6">
-              <div className="bg-white rounded-lg shadow p-6">
-                <h2 className="text-3xl font-bold text-gray-900 mb-8 flex items-center gap-3">
+            <div className="space-y-4 sm:space-y-6">
+              <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+                <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-6 sm:mb-8 flex items-center gap-2 sm:gap-3">
                   <span>📊 Business Analytics</span>
                 </h2>
 
                 {/* Overall Stats */}
-                <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                  <div className="bg-gradient-to-br from-green-50 to-green-100 border-2 border-green-500 rounded-lg p-6">
-                    <div className="text-sm font-medium text-green-800 mb-2">💰 Total Gross Revenue</div>
-                    <div className="text-3xl font-bold text-green-700">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 mb-6 sm:mb-8">
+                  <div className="bg-gradient-to-br from-green-50 to-green-100 border-2 border-green-500 rounded-lg p-4 sm:p-6">
+                    <div className="text-xs sm:text-sm font-medium text-green-800 mb-2">💰 Total Gross Revenue</div>
+                    <div className="text-2xl sm:text-3xl font-bold text-green-700">
                       ${totals.totalGrossRevenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                     <div className="text-xs text-green-600 mt-2">{clientsWithCalc.length} customers</div>
                   </div>
 
-                  <div className="bg-gradient-to-br from-blue-50 to-blue-100 border-2 border-blue-500 rounded-lg p-6">
-                    <div className="text-sm font-medium text-blue-800 mb-2">✨ Total Net Profit</div>
-                    <div className="text-3xl font-bold text-blue-700">
+                  <div className="bg-gradient-to-br from-blue-50 to-blue-100 border-2 border-blue-500 rounded-lg p-4 sm:p-6">
+                    <div className="text-xs sm:text-sm font-medium text-blue-800 mb-2">✨ Total Net Profit</div>
+                    <div className="text-2xl sm:text-3xl font-bold text-blue-700">
                       ${totals.totalNetProfit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                     <div className="text-xs text-blue-600 mt-2">After all costs</div>
                   </div>
 
-                  <div className="bg-gradient-to-br from-purple-50 to-purple-100 border-2 border-purple-500 rounded-lg p-6">
-                    <div className="text-sm font-medium text-purple-800 mb-2">📈 Avg Profit/Customer</div>
-                    <div className="text-3xl font-bold text-purple-700">
+                  <div className="bg-gradient-to-br from-purple-50 to-purple-100 border-2 border-purple-500 rounded-lg p-4 sm:p-6">
+                    <div className="text-xs sm:text-sm font-medium text-purple-800 mb-2">📈 Avg Profit/Customer</div>
+                    <div className="text-2xl sm:text-3xl font-bold text-purple-700">
                       ${avgProfitPerCustomer.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                     <div className="text-xs text-purple-600 mt-2">Per year</div>

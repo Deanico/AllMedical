@@ -1,0 +1,166 @@
+===========================================
+    ALLMEDICAL MOBILE APP - VISUAL GUIDE
+===========================================
+
+STEP 1: INSTALL EXPO GO
+========================
+
+On Your Phone:
+  ____________
+ |            |
+ | App Store  |  or  Google Play
+ |____________|
+ 
+ Search: "Expo Go"
+ 
+ Download (it's FREE!)
+
+
+STEP 2: RUN THE SQL (ONE TIME)
+===============================
+
+Computer Browser:
+  _________________________________
+ |                                 |
+ | supabase.com                    |
+ | → Your Project                  |
+ | → SQL Editor (left side)        |
+ | → New Query                     |
+ | → Paste the code                |
+ | → Click RUN                     |
+ |_________________________________|
+
+
+STEP 3: START THE APP
+======================
+
+On Your Computer:
+
+  File Explorer
+    ↓
+  AllMedical\mobile folder
+    ↓
+  Double-click: START_APP.bat
+    ↓
+  Black window opens
+    ↓
+  Browser opens with QR code
+  
+   ████████████████
+   ████  ██  ██████
+   ████████  ██████   ← Scan this!
+   ██  ██████  ████
+   ████████████████
+
+
+STEP 4: SCAN QR CODE
+====================
+
+On Your Phone:
+
+ Open Expo Go App
+    ↓
+ Tap "Scan QR Code"
+    ↓
+ Point camera at QR code
+    ↓
+ Wait 10-30 seconds
+    ↓
+ App loads!
+
+
+STEP 5: LOGIN
+=============
+
+On Your Phone Screen:
+
+  ________________________
+ |                        |
+ |   AllMedical           |
+ |   Admin Portal         |
+ |                        |
+ | Email: [__________]    |
+ |                        |
+ | Password: [_______]    |
+ |                        |
+ |    [ LOGIN ]           |
+ |________________________|
+ 
+ Use same login as web dashboard!
+
+
+STEP 6: VIEW LEADS
+==================
+
+  ________________________
+ |  Leads (25)    Logout  |
+ |________________________|
+ |                        |
+ | John Smith             |
+ | 📞 (555) 123-4567  ← Tap to call!
+ | john@email.com         |
+ | Blue Cross             |
+ |________________________|
+ |                        |
+ | Mary Johnson           |
+ | 📞 (555) 987-6543      |
+ | mary@email.com         |
+ | Aetna                  |
+ |________________________|
+
+
+STEP 7: EDIT A LEAD
+===================
+
+Tap any lead to see details:
+
+  ________________________
+ | ← Back  Lead Details   |
+ |________________________|
+ |                        |
+ | 📞 Call (555) 123-4567 |
+ |________________________|
+ |                        |
+ | Name: John Smith       |
+ | Email: john@email.com  |
+ | Phone: (555) 123-4567  |
+ | Insurance: Blue Cross  |
+ |                        |
+ |   [ EDIT LEAD ]        |
+ |________________________|
+
+Tap EDIT LEAD → Change info → Save!
+
+
+DONE! 🎉
+=========
+
+Your mobile app is running!
+
+To stop: Press Ctrl+C in the black window
+
+To start again: Double-click START_APP.bat
+
+
+TROUBLESHOOTING
+===============
+
+Problem: QR code doesn't show
+Solution: Wait 60 seconds
+
+Problem: Phone can't connect
+Solution: Same WiFi on phone + computer
+
+Problem: Can't login
+Solution: Same password as web dashboard
+
+Problem: No leads showing
+Solution: Pull down to refresh
+
+
+===========================================
+       Questions? Check these files:
+       
+       SIMPLE_SETUP_GUIDE.md
+       SETUP_CHECKLIST.md
+===========================================

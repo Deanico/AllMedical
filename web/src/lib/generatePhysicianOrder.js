@@ -25,6 +25,19 @@ function formatPhoneNumber(phone) {
 }
 
 /**
+ * Formats a date string without timezone conversion issues
+ * @param {string} dateString - Date string in YYYY-MM-DD format
+ * @returns {string} - Formatted date string
+ */
+function formatDate(dateString) {
+  if (!dateString) return '';
+  // Parse YYYY-MM-DD format directly without timezone conversion
+  const [year, month, day] = dateString.split('T')[0].split('-');
+  const date = new Date(year, month - 1, day);
+  return date.toLocaleDateString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric' });
+}
+
+/**
  * Generates a physician order document by filling in the Word template
  * @param {Object} patient - Patient information
  * @param {Object} doctor - Doctor information
@@ -53,20 +66,26 @@ export async function generatePhysicianOrder(patient, doctor) {
     const patientFirst = patientNameParts[0] || '';
     const patientLast = patientNameParts.slice(1).join(' ') || '';
     
-    // Parse doctor name into first and last name (excluding credentials)
-    const doctorNameParts = (doctor.full_name || '').trim().split(/\s+/);
-    // Remove common medical credentials from the end
-    const credentials = ['MD', 'DO', 'NP', 'PA', 'FNP', 'RN', 'APRN', 'DNP', 'PHD', 'DPM', 'DDS', 'DMD'];
-    const filteredParts = doctorNameParts.filter(part => 
-      !credentials.includes(part.toUpperCase().replace(/[.,]/g, ''))
-    );
-    const doctorFirst = filteredParts[0] || '';
-    const doctorLast = filteredParts[filteredParts.length - 1] || '';
+    // Use structured first and last name from NPPES data
+    // Falls back to parsing full_name if first/last not available (for legacy data)
+    let doctorFirst = doctor.first_name || '';
+    let doctorLast = doctor.last_name || '';
+    
+    // Fallback for legacy records without first_name/last_name
+    if (!doctorFirst && !doctorLast && doctor.full_name) {
+      const doctorNameParts = doctor.full_name.trim().split(/\s+/);
+      const credentials = ['MD', 'DO', 'NP', 'PA', 'FNP', 'RN', 'APRN', 'DNP', 'PHD', 'DPM', 'DDS', 'DMD'];
+      const filteredParts = doctorNameParts.filter(part => 
+        !credentials.includes(part.toUpperCase().replace(/[.,]/g, ''))
+      );
+      doctorFirst = filteredParts[0] || '';
+      doctorLast = filteredParts[filteredParts.length - 1] || '';
+    }
     
     // Format birthday
     let birthday = '';
     if (patient.birthday) {
-      birthday = new Date(patient.birthday).toLocaleDateString('en-US');
+      birthday = formatDate(patient.birthday);
     }
     
     // Format city/state/zip for patient and doctor
