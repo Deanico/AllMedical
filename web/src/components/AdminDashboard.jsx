@@ -355,6 +355,9 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
     setUpdating(true)
     try {
+      // Format birthday to include time at noon UTC to prevent timezone shift issues
+      const birthdayValue = addLeadForm.birthday ? `${addLeadForm.birthday}T12:00:00` : null;
+      
       const { data, error } = await supabase
         .from('leads')
         .insert([{
@@ -362,7 +365,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
           email: addLeadForm.email,
           phone: addLeadForm.phone || null,
           insurance: addLeadForm.insurance || null,
-          birthday: addLeadForm.birthday || null,
+          birthday: birthdayValue,
           address_line1: addLeadForm.address_line1 || null,
           city: addLeadForm.city || null,
           state: addLeadForm.state || null,
@@ -584,6 +587,9 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     if (!supabase || !selectedClient) return
 
     try {
+      // Format birthday to include time at noon UTC to prevent timezone shift issues
+      const birthdayValue = editForm.birthday ? `${editForm.birthday}T12:00:00` : null;
+      
       const { error } = await supabase
         .from('leads')
         .update({
@@ -591,7 +597,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
           email: editForm.email,
           phone: editForm.phone,
           insurance: editForm.insurance,
-          birthday: editForm.birthday || null,
+          birthday: birthdayValue,
           address_line1: editForm.address_line1,
           city: editForm.city,
           state: editForm.state,
@@ -612,10 +618,19 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   }
 
   const openEditModal = () => {
-    // Normalize birthday to YYYY-MM-DD format for date input
-    const birthdayValue = selectedClient.birthday 
-      ? selectedClient.birthday.split('T')[0] 
-      : '';
+    // Properly format birthday for date input to match display
+    // When database has "1980-12-30T00:00:00Z", we need to extract the LOCAL date, not UTC
+    let birthdayValue = '';
+    if (selectedClient.birthday) {
+      const dateStr = selectedClient.birthday.split('T')[0]; // Get YYYY-MM-DD
+      const [year, month, day] = dateStr.split('-');
+      // Create date in local timezone and format for input
+      const localDate = new Date(year, month - 1, day);
+      const yyyy = localDate.getFullYear();
+      const mm = String(localDate.getMonth() + 1).padStart(2, '0');
+      const dd = String(localDate.getDate()).padStart(2, '0');
+      birthdayValue = `${yyyy}-${mm}-${dd}`;
+    }
     
     setEditForm({
       name: selectedClient.name,
