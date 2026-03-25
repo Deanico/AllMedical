@@ -1,0 +1,21 @@
+{
+  "name": "shipping-automation",
+  "version": "1.0.0",
+  "description": "Browser automation for supplier order placement",
+  "main": "teststripz-automation.js",
+  "type": "module",
+  "scripts": {
+    "test": "node teststripz-automation.js --test",
+    "place-orders": "node teststripz-automation.js",
+    "check-prices": "node price-checker.js",
+    "setup": "node setup-credentials.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "playwright": "^1.40.0",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.40.0"
+  }
+}

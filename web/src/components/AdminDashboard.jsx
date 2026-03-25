@@ -12,6 +12,8 @@ const formatDate = (dateString) => {
 }
 
 export default function AdminDashboard({ userEmail, onLogout }) {
+  const [activeView, setActiveView] = useState('dashboard')
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [activeTab, setActiveTab] = useState('leads')
   const [leads, setLeads] = useState([])
   const [selectedClient, setSelectedClient] = useState(null)
@@ -46,6 +48,9 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const [generatingPDF, setGeneratingPDF] = useState(false)
   const [showSuccessModal, setShowSuccessModal] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [clientSearchQuery, setClientSearchQuery] = useState('')
+  const [insuranceFilter, setInsuranceFilter] = useState('')
+  const [productFilter, setProductFilter] = useState('')
   const [showAddLeadModal, setShowAddLeadModal] = useState(false)
   const [addLeadForm, setAddLeadForm] = useState({ 
     name: '', 
@@ -60,8 +65,6 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   })
   const [showShippingModal, setShowShippingModal] = useState(false)
   const [shippingClient, setShippingClient] = useState(null)
-  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth())
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
   const [selectedCalcClient, setSelectedCalcClient] = useState(null)
   const [editingCalculator, setEditingCalculator] = useState(false)
   const [showMobileDetails, setShowMobileDetails] = useState(false)
@@ -80,13 +83,72 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     costOfProduct: ''
   })
 
+  // Products & Shipping System State
+  const [products, setProducts] = useState([])
+  const [suppliers, setSuppliers] = useState([])
+  const [clientProducts, setClientProducts] = useState([])
+  const [allClientProducts, setAllClientProducts] = useState({}) // { clientId: [products] }
+  const [pendingOrders, setPendingOrders] = useState([])
+  const [showAddProductModal, setShowAddProductModal] = useState(false)
+  const [showEditProductModal, setShowEditProductModal] = useState(false)
+  const [editingProduct, setEditingProduct] = useState(null)
+  const [productForm, setProductForm] = useState({
+    name: '',
+    category: '',
+    manufacturer: '',
+    description: '',
+    sku: ''
+  })
+  const [showAssignProductModal, setShowAssignProductModal] = useState(false)
+  const [assignProductClient, setAssignProductClient] = useState(null)
+  const [assignProductForm, setAssignProductForm] = useState({
+    product_id: '',
+    quantity: 1,
+    frequency_days: 30
+  })
+
+  // Projects & Tasks State
+  const [projects, setProjects] = useState([])
+  const [tasks, setTasks] = useState([])
+  const [showAddProjectModal, setShowAddProjectModal] = useState(false)
+  const [showEditProjectModal, setShowEditProjectModal] = useState(false)
+  const [showAddTaskModal, setShowAddTaskModal] = useState(false)
+  const [showEditTaskModal, setShowEditTaskModal] = useState(false)
+  const [selectedProject, setSelectedProject] = useState(null)
+  const [editingProject, setEditingProject] = useState(null)
+  const [editingTask, setEditingTask] = useState(null)
+  const [viewingProjectId, setViewingProjectId] = useState(null)
+  const [projectForm, setProjectForm] = useState({ name: '', description: '', deadline: '', goal: '' })
+  const [taskForm, setTaskForm] = useState({ title: '', description: '', due_date: '', priority: 'medium', project_id: '' })
+
+  // Helper function to format dates without timezone conversion
+  const formatDate = (dateString) => {
+    if (!dateString) return ''
+    const date = new Date(dateString + 'T00:00:00')
+    return date.toLocaleDateString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric' })
+  }
+
+  // Expenses & Revenue State
+  const [expenses, setExpenses] = useState([])
+  const [showAddExpenseModal, setShowAddExpenseModal] = useState(false)
+  const [expenseForm, setExpenseForm] = useState({ description: '', amount: '', category: '', date: '' })
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth())
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
+
   useEffect(() => {
     fetchLeads()
+    fetchProducts()
+    fetchSuppliers()
+    fetchAllClientProducts()
+    fetchProjects()
+    fetchTasks()
+    fetchExpenses()
   }, [])
 
   useEffect(() => {
     if (selectedClient) {
       fetchDoctors(selectedClient.id)
+      fetchClientProducts(selectedClient.id)
       setProductNeeded(selectedClient.product_needed || '')
       // Reset calculator editing state when switching clients
       setEditingCalculator(false)
@@ -145,6 +207,183 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       setDoctors(data || [])
     } catch (error) {
       console.error('Error fetching doctors:', error)
+    }
+  }
+
+  const fetchProducts = async () => {
+    if (!supabase) return
+
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .eq('active', true)
+        .order('category', { ascending: true })
+        .order('name', { ascending: true })
+
+      if (error) throw error
+      setProducts(data || [])
+    } catch (error) {
+      console.error('Error fetching products:', error)
+    }
+  }
+
+  const fetchSuppliers = async () => {
+    if (!supabase) return
+
+    try {
+      const { data, error } = await supabase
+        .from('suppliers')
+        .select('*')
+        .eq('active', true)
+        .order('name', { ascending: true })
+
+      if (error) throw error
+      setSuppliers(data || [])
+    } catch (error) {
+      console.error('Error fetching suppliers:', error)
+    }
+  }
+
+  const fetchProjects = async () => {
+    if (!supabase) return
+    try {
+      const { data, error } = await supabase
+        .from('projects')
+        .select('*')
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      setProjects(data || [])
+    } catch (error) {
+      console.error('Error fetching projects:', error)
+    }
+  }
+
+  const fetchTasks = async () => {
+    if (!supabase) return
+    try {
+      const { data, error } = await supabase
+        .from('tasks')
+        .select('*')
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      setTasks(data || [])
+    } catch (error) {
+      console.error('Error fetching tasks:', error)
+    }
+  }
+
+  const fetchExpenses = async () => {
+    if (!supabase) return
+    try {
+      const { data, error } = await supabase
+        .from('expenses')
+        .select('*')
+        .order('date', { ascending: false })
+      if (error) throw error
+      setExpenses(data || [])
+    } catch (error) {
+      console.error('Error fetching expenses:', error)
+    }
+  }
+
+  const fetchClientProducts = async (clientId) => {
+    if (!supabase || !clientId) return
+
+    try {
+      const { data, error } = await supabase
+        .from('client_products')
+        .select(`
+          *,
+          products (
+            id,
+            name,
+            category,
+            manufacturer
+          )
+        `)
+        .eq('lead_id', clientId)
+        .eq('active', true)
+
+      if (error) throw error
+      setClientProducts(data || [])
+    } catch (error) {
+      console.error('Error fetching client products:', error)
+    }
+  }
+
+  const fetchAllClientProducts = async () => {
+    if (!supabase) return
+
+    try {
+      const { data, error } = await supabase
+        .from('client_products')
+        .select(`
+          lead_id,
+          products (
+            id,
+            name,
+            category
+          )
+        `)
+        .eq('active', true)
+
+      if (error) throw error
+      
+      // Group by client ID
+      const grouped = {}
+      data?.forEach(item => {
+        if (!grouped[item.lead_id]) {
+          grouped[item.lead_id] = []
+        }
+        grouped[item.lead_id].push(item.products)
+      })
+      
+      setAllClientProducts(grouped)
+    } catch (error) {
+      console.error('Error fetching all client products:', error)
+    }
+  }
+
+  const fetchPendingOrders = async () => {
+    if (!supabase) return
+
+    try {
+      const { data, error } = await supabase
+        .from('pending_orders')
+        .select(`
+          *,
+          leads (
+            id,
+            name,
+            address_line1,
+            city,
+            state,
+            zip_code
+          ),
+          pending_order_items (
+            id,
+            quantity,
+            price,
+            products (
+              id,
+              name,
+              category
+            ),
+            suppliers (
+              id,
+              name,
+              website
+            )
+          )
+        `)
+        .in('status', ['pending', 'reviewed'])
+        .order('ship_date', { ascending: true })
+
+      if (error) throw error
+      setPendingOrders(data || [])
+    } catch (error) {
+      console.error('Error fetching pending orders:', error)
     }
   }
 
@@ -466,6 +705,117 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     }
   }
 
+  const createPendingOrder = async (client) => {
+    if (!supabase || !client || !client.date_shipped || !client.shipping_duration) {
+      return // Can't create order without shipping info
+    }
+
+    try {
+      // Calculate next ship date
+      const lastShipped = new Date(client.date_shipped + 'T12:00:00')
+      let nextShipDate = new Date(lastShipped)
+
+      if (client.shipping_duration === 'end_of_month') {
+        // Next ship is end of next month
+        nextShipDate = new Date(lastShipped.getFullYear(), lastShipped.getMonth() + 2, 0)
+      } else if (client.shipping_duration === '3_month') {
+        // Add 3 months
+        nextShipDate.setMonth(nextShipDate.getMonth() + 3)
+      } else {
+        // Default to 1 month
+        nextShipDate.setMonth(nextShipDate.getMonth() + 1)
+      }
+
+      const nextShipDateStr = nextShipDate.toISOString().split('T')[0]
+
+      // Get client's assigned products
+      const { data: clientProds, error: prodError } = await supabase
+        .from('client_products')
+        .select(`
+          *,
+          products (
+            id,
+            name,
+            category
+          )
+        `)
+        .eq('lead_id', client.id)
+        .eq('active', true)
+
+      if (prodError) throw prodError
+
+      // Only create order if client has assigned products
+      if (!clientProds || clientProds.length === 0) {
+        console.log(`No products assigned to ${client.name}, skipping order creation`)
+        return
+      }
+
+      // Create the pending order
+      const { data: order, error: orderError } = await supabase
+        .from('pending_orders')
+        .insert([{
+          lead_id: client.id,
+          ship_date: nextShipDateStr,
+          status: 'pending',
+          order_details: {
+            client_name: client.name,
+            address: {
+              line1: client.address_line1,
+              city: client.city,
+              state: client.state,
+              zip: client.zip_code
+            }
+          }
+        }])
+        .select()
+        .single()
+
+      if (orderError) throw orderError
+
+      // Add order items with cheapest supplier for each product
+      const orderItems = []
+      
+      for (const cp of clientProds) {
+        // Find cheapest supplier for this product
+        const { data: cheapestSupplier, error: supplierError } = await supabase
+          .from('product_suppliers')
+          .select('id, supplier_id, price')
+          .eq('product_id', cp.product_id)
+          .eq('in_stock', true)
+          .not('price', 'is', null)
+          .order('price', { ascending: true })
+          .limit(1)
+          .single()
+
+        // Use cheapest supplier if found, otherwise no supplier
+        orderItems.push({
+          pending_order_id: order.id,
+          product_id: cp.product_id,
+          quantity: cp.quantity,
+          supplier_id: cheapestSupplier?.supplier_id || null,
+          price: cheapestSupplier?.price || null
+        })
+
+        if (cheapestSupplier) {
+          console.log(`  → ${cp.products.name}: $${cheapestSupplier.price} (cheapest)`)
+        } else {
+          console.log(`  → ${cp.products.name}: No pricing data`)
+        }
+      }
+
+      const { error: itemsError } = await supabase
+        .from('pending_order_items')
+        .insert(orderItems)
+
+      if (itemsError) throw itemsError
+
+      console.log(`Created pending order for ${client.name} on ${nextShipDateStr}`)
+    } catch (error) {
+      console.error('Error creating pending order:', error)
+      // Don't throw - order creation is a helper, not critical for shipping
+    }
+  }
+
   const handleMarkShipped = async (duration) => {
     if (!supabase || !shippingClient) return
 
@@ -495,14 +845,22 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
       if (error) throw error
 
-      // Refresh leads list
+      // Create pending order for next shipment
+      await createPendingOrder({
+        ...shippingClient,
+        date_shipped: today.toISOString().split('T')[0],
+        shipping_duration: shippingDuration
+      })
+
+      // Refresh leads list and pending orders
       await fetchLeads()
+      await fetchPendingOrders()
       
       // Close modal
       setShowShippingModal(false)
       setShippingClient(null)
       
-      alert('Shipment marked successfully!')
+      alert('Shipment marked successfully! Check the Shipping Queue tab to see the pending order.')
     } catch (error) {
       console.error('Error marking shipment:', error)
       alert('Failed to mark shipment: ' + error.message)
@@ -900,140 +1258,368 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     )
   }
 
+  // Navigation items
+  const navigation = [
+    { id: 'dashboard', name: 'Dashboard', icon: '📊' },
+    { id: 'leads', name: 'Leads', icon: '👤', badge: leads.length },
+    { id: 'clients', name: 'Clients', icon: '👥', badge: qualifiedLeads.length },
+    { id: 'shipping', name: 'Shipping', icon: '📦' },
+    { id: 'products', name: 'Products', icon: '🏷️' },
+    { id: 'calendar', name: 'Calendar', icon: '📅' },
+    { id: 'billing', name: 'Billing', icon: '💰' },
+    { id: 'projects', name: 'Projects & Tasks', icon: '✓' },
+    { id: 'reports', name: 'Reports', icon: '📈' },
+  ]
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white shadow">
-        <div className="max-w-7xl mx-auto px-3 sm:px-4 py-3 sm:py-4">
-          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
-            <h1 className="text-xl sm:text-2xl font-bold text-blue-900">Admin Dashboard</h1>
-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4">
-              <button
-                onClick={handleSyncFromSheets}
-                disabled={syncing}
-                className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white px-3 sm:px-4 py-2 rounded-md text-xs sm:text-sm font-medium w-full sm:w-auto"
-              >
-                {syncing ? 'Syncing...' : '↻ Sync from Google Sheets'}
-              </button>
-              <span className="text-gray-600 text-xs sm:text-sm hidden sm:inline">{userEmail}</span>
-              <button
-                onClick={onLogout}
-                className="bg-gray-200 hover:bg-gray-300 text-gray-800 px-3 sm:px-4 py-2 rounded-md text-xs sm:text-sm w-full sm:w-auto"
-              >
-                Logout
-              </button>
-            </div>
-          </div>
+    <div className="min-h-screen bg-gray-50 flex">
+      {/* Sidebar */}
+      <div className={`${sidebarCollapsed ? 'w-16' : 'w-64'} bg-white border-r border-gray-200 transition-all duration-300 flex flex-col`}>
+        {/* Logo & Toggle */}
+        <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+          {!sidebarCollapsed && <h1 className="text-xl font-bold text-red-600">AllMedical</h1>}
+          <button 
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            className="p-2 hover:bg-gray-100 rounded-lg"
+          >
+            {sidebarCollapsed ? '→' : '←'}
+          </button>
+        </div>
+
+        {/* Navigation */}
+        <nav className="flex-1 p-3 space-y-1">
+          {navigation.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => {
+                setActiveView(item.id)
+                setSelectedClient(null)
+                setShowMobileDetails(false)
+                if (item.id === 'shipping') {
+                  fetchPendingOrders()
+                }
+              }}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors ${
+                activeView === item.id
+                  ? 'bg-blue-50 text-blue-700 font-medium'
+                  : 'text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              <span className="text-xl">{item.icon}</span>
+              {!sidebarCollapsed && (
+                <>
+                  <span className="flex-1">{item.name}</span>
+                  {item.badge !== undefined && (
+                    <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-xs font-semibold">
+                      {item.badge}
+                    </span>
+                  )}
+                </>
+              )}
+            </button>
+          ))}
+        </nav>
+
+        {/* User Info & Logout */}
+        <div className="p-4 border-t border-gray-200">
+          {!sidebarCollapsed && (
+            <div className="text-sm text-gray-600 mb-2 truncate">{userEmail}</div>
+          )}
+          <button
+            onClick={onLogout}
+            className="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 px-3 py-2 rounded-lg text-sm font-medium"
+          >
+            {sidebarCollapsed ? '⎋' : 'Logout'}
+          </button>
         </div>
       </div>
 
-      {/* Sync Result Notification */}
-      {syncResult && (
-        <div className="max-w-7xl mx-auto px-4 pt-6">
-          {syncResult.error ? (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
-              {syncResult.error}
-            </div>
-          ) : (
-            <div className="bg-green-50 border-2 border-green-400 text-green-800 px-6 py-4 rounded-lg mb-4 text-lg font-semibold">
-              ✓ Successfully imported {syncResult.added} new leads from Google Sheets! ({syncResult.skipped} duplicates skipped)
+      {/* Main Content */}
+      <div className="flex-1 overflow-auto">
+        {/* Header */}
+        <div className="bg-white border-b border-gray-200 px-6 py-4">
+          <div className="flex justify-between items-center">
+            <h2 className="text-2xl font-bold text-gray-900">
+              {navigation.find(n => n.id === activeView)?.name || 'Dashboard'}
+            </h2>
+            <button
+              onClick={handleSyncFromSheets}
+              disabled={syncing}
+              className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white px-4 py-2 rounded-md text-sm font-medium"
+            >
+              {syncing ? 'Syncing...' : '↻ Sync from Google Sheets'}
+            </button>
+          </div>
+        </div>
+
+        {/* Sync Result Notification */}
+        {syncResult && (
+          <div className="px-6 pt-4">
+            {syncResult.error ? (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+                {syncResult.error}
+              </div>
+            ) : (
+              <div className="bg-green-50 border-2 border-green-400 text-green-800 px-6 py-4 rounded-lg mb-4 text-lg font-semibold">
+                ✓ Successfully imported {syncResult.added} new leads from Google Sheets! ({syncResult.skipped} duplicates skipped)
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* View Content */}
+        <div className="p-6">
+          {/* Dashboard View */}
+          {activeView === 'dashboard' && (
+            <div className="space-y-6">
+              {/* Metrics Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                {/* Pending Shipments */}
+                <div className="bg-white rounded-lg shadow p-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">Pending Shipments</p>
+                      <p className="text-3xl font-bold text-gray-900 mt-2">{pendingOrders.filter(o => o.status === 'pending').length}</p>
+                    </div>
+                    <div className="bg-blue-100 rounded-full p-3">
+                      <span className="text-2xl">📦</span>
+                    </div>
+                  </div>
+                  <p className="text-sm text-gray-500 mt-4">Orders awaiting processing</p>
+                </div>
+
+                {/* Active Clients */}
+                <div className="bg-white rounded-lg shadow p-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">Active Clients</p>
+                      <p className="text-3xl font-bold text-gray-900 mt-2">{qualifiedLeads.length}</p>
+                    </div>
+                    <div className="bg-green-100 rounded-full p-3">
+                      <span className="text-2xl">👥</span>
+                    </div>
+                  </div>
+                  <p className="text-sm text-gray-500 mt-4">
+                    {leads.length - qualifiedLeads.length} leads in pipeline
+                  </p>
+                </div>
+
+                {/* Monthly Revenue */}
+                <div className="bg-white rounded-lg shadow p-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">Monthly Revenue</p>
+                      <p className="text-3xl font-bold text-gray-900 mt-2">
+                        ${(() => {
+                          const totalYearlyNetProfit = qualifiedLeads.reduce((total, client) => {
+                            if (!client.calc_deductible || !client.calc_insurance_paid || !client.calc_percent_allowable || !client.calc_product_cost) {
+                              return total
+                            }
+
+                            const deductible = parseFloat(client.calc_deductible) || 0
+                            const oopMax = parseFloat(client.calc_oop_max) || 0
+                            const percentOfAllowable = parseFloat(client.calc_percent_allowable) || 0
+                            const allowableAmount = parseFloat(client.calc_insurance_paid) || 0
+                            const costOfProduct = parseFloat(client.calc_product_cost) || 0
+
+                            let remainingDeductible = deductible
+                            let patientOOPTotal = 0
+                            let yearlyRevenue = 0
+
+                            for (let month = 1; month <= 12; month++) {
+                              let insurancePayment
+                              let patientPayment
+
+                              if (oopMax > 0 && patientOOPTotal >= oopMax) {
+                                insurancePayment = allowableAmount
+                                patientPayment = 0
+                              } else {
+                                insurancePayment = allowableAmount * (percentOfAllowable / 100)
+                                patientPayment = allowableAmount - insurancePayment
+                              }
+
+                              patientOOPTotal += patientPayment
+
+                              if (remainingDeductible > 0) {
+                                if (insurancePayment >= remainingDeductible) {
+                                  yearlyRevenue += insurancePayment - remainingDeductible
+                                  remainingDeductible = 0
+                                } else {
+                                  remainingDeductible -= insurancePayment
+                                }
+                              } else {
+                                yearlyRevenue += insurancePayment
+                              }
+                            }
+
+                            const yearlyNetProfit = yearlyRevenue - (costOfProduct * 12)
+                            return total + yearlyNetProfit
+                          }, 0)
+
+                          return (totalYearlyNetProfit / 12).toFixed(2)
+                        })()}
+                      </p>
+                    </div>
+                    <div className="bg-purple-100 rounded-full p-3">
+                      <span className="text-2xl">💰</span>
+                    </div>
+                  </div>
+                  <p className="text-sm text-gray-500 mt-4">Estimated insurance revenue</p>
+                </div>
+
+                {/* Items Due Today */}
+                <div className="bg-white rounded-lg shadow p-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">Items Due Today</p>
+                      <p className="text-3xl font-bold text-gray-900 mt-2">
+                        {pendingOrders.filter(o => {
+                          const today = new Date().toISOString().split('T')[0]
+                          return o.ship_date === today && o.status === 'pending'
+                        }).length}
+                      </p>
+                    </div>
+                    <div className="bg-orange-100 rounded-full p-3">
+                      <span className="text-2xl">⚡</span>
+                    </div>
+                  </div>
+                  <p className="text-sm text-gray-500 mt-4">Urgent shipments</p>
+                </div>
+              </div>
+
+              {/* Charts Row */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Client Growth */}
+                <div className="bg-white rounded-lg shadow p-6">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Client Growth</h3>
+                  <div className="space-y-3">
+                    {(() => {
+                      // Client growth by month - counts when leads were converted to qualified status
+                      const clientGrowthData = [
+                        { month: 'Oct', clients: 0 },
+                        { month: 'Nov', clients: 0 },
+                        { month: 'Dec', clients: 0 },
+                        { month: 'Jan', clients: 4 },
+                        { month: 'Feb', clients: 10 },
+                        { month: 'Mar', clients: 10 }
+                      ]
+                      
+                      const maxClients = Math.max(...clientGrowthData.map(d => d.clients), 1)
+                      
+                      return clientGrowthData.map((data) => {
+                        const percentage = (data.clients / maxClients) * 100
+                        return (
+                          <div key={data.month} className="flex items-center gap-3">
+                            <div className="w-12 text-sm text-gray-600">{data.month}</div>
+                            <div className="flex-1 bg-gray-200 rounded-full h-3">
+                              <div 
+                                className="bg-blue-600 rounded-full h-3" 
+                                style={{ width: `${percentage}%` }}
+                              ></div>
+                            </div>
+                            <div className="w-12 text-sm font-semibold text-gray-900 text-right">{data.clients}</div>
+                          </div>
+                        )
+                      })
+                    })()}
+                  </div>
+                </div>
+
+                {/* Product Demand */}
+                <div className="bg-white rounded-lg shadow p-6">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Product Demand</h3>
+                  <div className="space-y-3">
+                    {(() => {
+                      // Count products across all clients
+                      const productCounts = {}
+                      Object.values(allClientProducts).forEach(clientProds => {
+                        clientProds.forEach(cp => {
+                          const name = cp.products?.name || 'Unknown'
+                          productCounts[name] = (productCounts[name] || 0) + 1
+                        })
+                      })
+                      
+                      const sortedProducts = Object.entries(productCounts)
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 5)
+                      
+                      const maxCount = sortedProducts[0]?.[1] || 1
+                      
+                      return sortedProducts.length > 0 ? sortedProducts.map(([name, count]) => {
+                        const percentage = (count / maxCount) * 100
+                        return (
+                          <div key={name} className="flex items-center gap-3">
+                            <div className="w-32 text-sm text-gray-600 truncate">{name}</div>
+                            <div className="flex-1 bg-gray-200 rounded-full h-3">
+                              <div 
+                                className="bg-green-600 rounded-full h-3" 
+                                style={{ width: `${percentage}%` }}
+                              ></div>
+                            </div>
+                            <div className="w-12 text-sm font-semibold text-gray-900 text-right">{count}</div>
+                          </div>
+                        )
+                      }) : (
+                        <p className="text-gray-500 text-sm">No product data yet</p>
+                      )
+                    })()}
+                  </div>
+                </div>
+              </div>
+
+              {/* Recent Activity */}
+              <div className="bg-white rounded-lg shadow p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Activity</h3>
+                <div className="space-y-3">
+                  {(() => {
+                    // Get recent leads (last 5)
+                    const recentLeads = [...leads].sort((a, b) => 
+                      new Date(b.created_at) - new Date(a.created_at)
+                    ).slice(0, 5)
+                    
+                    return recentLeads.length > 0 ? recentLeads.map((lead) => (
+                      <div key={lead.id} className="flex items-center gap-3 py-2 border-b border-gray-100 last:border-0">
+                        <div className="bg-blue-100 rounded-full p-2">
+                          <span className="text-sm">👤</span>
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-gray-900">{lead.name}</p>
+                          <p className="text-xs text-gray-500">{lead.email}</p>
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {new Date(lead.created_at).toLocaleDateString()}
+                        </div>
+                      </div>
+                    )) : (
+                      <p className="text-gray-500 text-sm">No recent activity</p>
+                    )
+                  })()}
+                </div>
+              </div>
             </div>
           )}
-        </div>
-      )}
 
-      {/* Tabs */}
-      <div className="max-w-7xl mx-auto px-2 sm:px-4 py-4 sm:py-6">
-        <div className="flex gap-2 sm:gap-4 mb-6 border-b border-gray-200 overflow-x-auto">
-          <button
-            onClick={() => setActiveTab('leads')}
-            className={`px-3 sm:px-6 py-2 sm:py-3 font-semibold transition-colors whitespace-nowrap text-sm sm:text-base ${
-              activeTab === 'leads'
-                ? 'text-blue-600 border-b-2 border-blue-600'
-                : 'text-gray-600 hover:text-gray-800'
-            }`}
-          >
-            Leads ({leads.length})
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab('clients')
-              setSelectedClient(null)
-              setShowMobileDetails(false)
-              setSearchQuery('') // Clear search when switching tabs
-            }}
-            className={`px-3 sm:px-6 py-2 sm:py-3 font-semibold transition-colors whitespace-nowrap text-sm sm:text-base ${
-              activeTab === 'clients'
-                ? 'text-blue-600 border-b-2 border-blue-600'
-                : 'text-gray-600 hover:text-gray-800'
-            }`}
-          >
-            Clients ({qualifiedLeads.length})
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab('calendar')
-              setSearchQuery('') // Clear search when switching tabs
-            }}
-            className={`px-3 sm:px-6 py-2 sm:py-3 font-semibold transition-colors whitespace-nowrap text-sm sm:text-base ${
-              activeTab === 'calendar'
-                ? 'text-blue-600 border-b-2 border-blue-600'
-                : 'text-gray-600 hover:text-gray-800'
-            }`}
-          >
-            Calendar
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab('calculator')
-              setSearchQuery('') // Clear search when switching tabs
-            }}
-            className={`px-3 sm:px-6 py-2 sm:py-3 font-semibold transition-colors whitespace-nowrap text-sm sm:text-base ${
-              activeTab === 'calculator'
-                ? 'text-blue-600 border-b-2 border-blue-600'
-                : 'text-gray-600 hover:text-gray-800'
-            }`}
-          >
-            <span className="hidden sm:inline">Payment Calculator</span>
-            <span className="sm:hidden">Calculator</span>
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab('analytics')
-              setSearchQuery('') // Clear search when switching tabs
-            }}
-            className={`px-3 sm:px-6 py-2 sm:py-3 font-semibold transition-colors whitespace-nowrap text-sm sm:text-base ${
-              activeTab === 'analytics'
-                ? 'text-blue-600 border-b-2 border-blue-600'
-                : 'text-gray-600 hover:text-gray-800'
-            }`}
-          >
-            <span className="hidden sm:inline">Fun Stuff 🎉</span>
-            <span className="sm:hidden">Analytics</span>
-          </button>
-        </div>
-
-        {/* Leads Tab */}
-        {activeTab === 'leads' && (
-          <div className="bg-white rounded-lg shadow overflow-hidden">
-            {/* Search and Add Lead Controls */}
-            <div className="p-3 sm:p-4 border-b border-gray-200 flex flex-col sm:flex-row gap-2 sm:gap-3">
-              <div className="flex-1">
-                <input
-                  type="text"
-                  placeholder="Search leads..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
+          {/* Leads Tab */}
+          {activeView === 'leads' && (
+            <div className="bg-white rounded-lg shadow overflow-hidden">
+              {/* Search and Add Lead Controls */}
+              <div className="p-3 sm:p-4 border-b border-gray-200 flex flex-col sm:flex-row gap-2 sm:gap-3">
+                <div className="flex-1">
+                  <input
+                    type="text"
+                    placeholder="Search leads..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+                <button
+                  onClick={() => setShowAddLeadModal(true)}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold text-sm sm:text-base whitespace-nowrap w-full sm:w-auto"
+                >
+                  + Add Lead
+                </button>
               </div>
-              <button
-                onClick={() => setShowAddLeadModal(true)}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold text-sm sm:text-base whitespace-nowrap w-full sm:w-auto"
-              >
-                + Add Lead
-              </button>
-            </div>
             
             {/* Desktop Table View */}
             <div className="hidden md:block overflow-x-auto">
@@ -1155,21 +1741,82 @@ export default function AdminDashboard({ userEmail, onLogout }) {
           </div>
         )}
 
-        {/* Clients Tab */}
-        {activeTab === 'clients' && (
+        {/* Clients View */}
+        {activeView === 'clients' && (
           <div className="grid md:grid-cols-2 gap-4 sm:gap-6">
             {/* Clients List */}
             <div className={`bg-white rounded-lg shadow ${showMobileDetails ? 'hidden md:block' : 'block'}`}>
               <div className="p-3 sm:p-4 border-b border-gray-200">
-                <h2 className="text-base sm:text-lg font-semibold text-gray-900">Client List</h2>
+                <h2 className="text-base sm:text-lg font-semibold text-gray-900 mb-3">Client List</h2>
+                
+                {/* Search and Filters */}
+                <div className="space-y-2">
+                  <input
+                    type="text"
+                    placeholder="Search clients (name, email, phone)..."
+                    value={clientSearchQuery}
+                    onChange={(e) => setClientSearchQuery(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  />
+                  <div className="flex gap-2">
+                    <select
+                      value={insuranceFilter}
+                      onChange={(e) => setInsuranceFilter(e.target.value)}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    >
+                      <option value="">All Insurance</option>
+                      {[...new Set(qualifiedLeads.map(c => c.insurance).filter(Boolean))].sort().map(insurance => (
+                        <option key={insurance} value={insurance}>{insurance}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={productFilter}
+                      onChange={(e) => setProductFilter(e.target.value)}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    >
+                      <option value="">All Products</option>
+                      <option value="sensor">CGM Sensors</option>
+                      <option value="pod">Pods</option>
+                      <option value="infusion_set">Infusion Sets</option>
+                      <option value="test_strips">Test Strips</option>
+                    </select>
+                  </div>
+                </div>
               </div>
               <div className="divide-y divide-gray-200 max-h-[600px] overflow-y-auto">
-                {qualifiedLeads.length === 0 ? (
-                  <div className="p-8 text-center text-gray-500">
-                    No qualified clients yet
-                  </div>
-                ) : (
-                  qualifiedLeads.map((client) => (
+                {(() => {
+                  // Apply filters
+                  let filtered = qualifiedLeads;
+                  
+                  // Search filter
+                  if (clientSearchQuery) {
+                    const query = clientSearchQuery.toLowerCase();
+                    filtered = filtered.filter(client => 
+                      client.name?.toLowerCase().includes(query) ||
+                      client.email?.toLowerCase().includes(query) ||
+                      client.phone?.toLowerCase().includes(query)
+                    );
+                  }
+                  
+                  // Insurance filter
+                  if (insuranceFilter) {
+                    filtered = filtered.filter(client => client.insurance === insuranceFilter);
+                  }
+                  
+                  // Product category filter
+                  if (productFilter) {
+                    filtered = filtered.filter(client => {
+                      const clientProds = allClientProducts[client.id] || [];
+                      return clientProds.some(p => p.category === productFilter);
+                    });
+                  }
+                  
+                  return filtered.length === 0 ? (
+                    <div className="p-8 text-center text-gray-500">
+                      {qualifiedLeads.length === 0 ? 'No qualified clients yet' : 'No clients match filters'}
+                    </div>
+                  ) : (
+                    filtered.map((client) => (
                     <div
                       key={client.id}
                       onClick={() => {
@@ -1191,9 +1838,24 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                       </div>
                       <div className="text-xs sm:text-sm text-gray-600">{client.email}</div>
                       <div className="text-xs sm:text-sm text-gray-600">{client.phone}</div>
+                      {/* Product Badges */}
+                      {allClientProducts[client.id] && allClientProducts[client.id].length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-2">
+                          {allClientProducts[client.id].map((product, idx) => (
+                            <span key={idx} className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700 font-medium">
+                              {product.category === 'sensor' ? '📱' :
+                               product.category === 'pod' ? '💊' :
+                               product.category === 'infusion_set' ? '💉' :
+                               product.category === 'test_strips' ? '🩸' : '📦'}
+                              {product.category}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))
-                )}
+                  );
+                })()}
               </div>
             </div>
 
@@ -1313,6 +1975,62 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                       />
                     </div>
 
+                    {/* Assigned Products Section */}
+                    <div className="border-t pt-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <label className="block text-sm font-medium text-gray-700">
+                          Assigned Products
+                        </label>
+                        <button
+                          onClick={() => {
+                            setAssignProductClient(selectedClient)
+                            setShowAssignProductModal(true)
+                          }}
+                          className="px-3 py-1 bg-green-600 text-white text-xs rounded-md hover:bg-green-700 font-medium"
+                        >
+                          + Add Product
+                        </button>
+                      </div>
+                      {clientProducts.length === 0 ? (
+                        <div className="text-sm text-gray-500 bg-gray-50 p-3 rounded-md text-center">
+                          No products assigned yet. Click "+ Add Product" to assign products.
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {clientProducts.map(cp => (
+                            <div key={cp.id} className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg p-3">
+                              <div className="flex-1">
+                                <div className="font-medium text-gray-900">{cp.products?.name}</div>
+                                <div className="text-xs text-gray-600">
+                                  Quantity: {cp.quantity} • Every {cp.frequency_days} days
+                                </div>
+                              </div>
+                              <button
+                                onClick={async () => {
+                                  if (confirm(`Remove ${cp.products?.name} from this client?`)) {
+                                    try {
+                                      const { error } = await supabase
+                                        .from('client_products')
+                                        .update({ active: false })
+                                        .eq('id', cp.id)
+                                      if (error) throw error
+                                      await fetchClientProducts(selectedClient.id)
+                                    } catch (error) {
+                                      console.error('Error removing product:', error)
+                                      alert('Failed to remove product')
+                                    }
+                                  }
+                                }}
+                                className="ml-3 text-red-600 hover:text-red-700 text-xs font-medium"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Date Shipped
@@ -1416,21 +2134,38 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
                             // Year-long simulation
                             let remainingDeductible = deductible
-                            let patientOOPTotal = 0
+                            let patientOOPTotal = 0 // Tracks all patient out-of-pocket spending
                             let totalRevenue = 0
 
                             for (let month = 1; month <= 12; month++) {
-                              let insurancePayment = insurancePaidAmount
-                              let patientPayment = patientPortionPerMonth
-
-                              // Check if OOP Max has been hit
+                              // Check if OOP Max has been hit BEFORE this month
+                              let insurancePayment, patientPayment
+                              
                               if (oopMax > 0 && patientOOPTotal >= oopMax) {
-                                // Insurance now pays 100%
+                                // OOP Max already hit - insurance pays 100%
                                 insurancePayment = fullAllowableAmount
                                 patientPayment = 0
+                              } else {
+                                // OOP Max not yet hit - normal cost sharing
+                                insurancePayment = insurancePaidAmount
+                                patientPayment = patientPortionPerMonth
+                                
+                                // Check if patient will hit OOP max THIS month
+                                if (oopMax > 0 && (patientOOPTotal + patientPayment) > oopMax) {
+                                  // Patient reaches OOP max partway through this month
+                                  const remainingBeforeMax = oopMax - patientOOPTotal
+                                  const percentOfMonthBeforeMax = remainingBeforeMax / patientPayment
+                                  
+                                  // Split the month: part at normal rate, part at 100% insurance
+                                  const insuranceBeforeMax = insurancePaidAmount * percentOfMonthBeforeMax
+                                  const insuranceAfterMax = fullAllowableAmount * (1 - percentOfMonthBeforeMax)
+                                  
+                                  insurancePayment = insuranceBeforeMax + insuranceAfterMax
+                                  patientPayment = remainingBeforeMax
+                                }
                               }
 
-                              // Track patient OOP
+                              // Track patient OOP (includes both deductible and cost-share payments)
                               patientOOPTotal += patientPayment
 
                               // Apply insurance payment toward deductible first, then as revenue
@@ -1439,14 +2174,21 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                                 if (insurancePayment >= remainingDeductible) {
                                   // Deductible fully met this month
                                   monthRevenue = insurancePayment - remainingDeductible
+                                  // Patient also pays toward deductible
+                                  const patientDeductiblePayment = Math.min(patientPayment, remainingDeductible - insurancePayment)
+                                  if (patientDeductiblePayment > 0) {
+                                    patientOOPTotal += patientDeductiblePayment
+                                  }
                                   remainingDeductible = 0
                                 } else {
-                                  // Deductible partially met
-                                  remainingDeductible -= insurancePayment
+                                  // Deductible partially met - patient helps pay deductible
+                                  const deductiblePaidThisMonth = insurancePayment + Math.min(patientPayment, remainingDeductible - insurancePayment)
+                                  remainingDeductible -= deductiblePaidThisMonth
+                                  // Deductible payments count toward OOP (already tracked above)
                                   monthRevenue = 0
                                 }
                               } else {
-                                // Deductible already met
+                                // Deductible already met - count only insurance payment as revenue
                                 monthRevenue = insurancePayment
                               }
 
@@ -1482,7 +2224,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                               <div className="text-sm text-gray-900">{selectedClient.calc_percent_allowable}%</div>
                             </div>
                             <div>
-                              <div className="text-xs font-medium text-gray-600">Insurance Monthly Payment</div>
+                              <div className="text-xs font-medium text-gray-600">Insurance Allowable Amount per Month</div>
                               <div className="text-sm text-gray-900">${selectedClient.calc_insurance_paid}</div>
                             </div>
                             <div className="col-span-2">
@@ -1524,13 +2266,13 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                             />
                           </div>
                           <div>
-                            <label className="block text-xs font-medium text-gray-700 mb-1">Insurance Monthly Payment ($)</label>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Insurance Allowable Amount per Month ($)</label>
                             <input
                               type="number"
                               value={clientCalcInputs.insurancePaidAmount}
                               onChange={(e) => setClientCalcInputs({ ...clientCalcInputs, insurancePaidAmount: e.target.value })}
                               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                              placeholder="200"
+                              placeholder="2000"
                             />
                           </div>
                           <div>
@@ -1802,8 +2544,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
           </div>
         )}
 
-        {/* Calendar Tab */}
-        {activeTab === 'calendar' && (
+        {/* Calendar View */}
+        {activeView === 'calendar' && (
           <div className="bg-white rounded-lg shadow p-4 sm:p-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 sm:mb-6 gap-3">
               <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Shipping Calendar</h2>
@@ -2055,8 +2797,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
           </div>
         )}
 
-        {/* Payment Calculator Tab */}
-        {activeTab === 'calculator' && (
+        {/* Billing View */}
+        {activeView === 'billing' && (
           <div className="bg-white rounded-lg shadow p-4 sm:p-6">
             <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-4 sm:mb-6">Insurance Payment Calculator</h2>
             
@@ -2166,7 +2908,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     placeholder="200"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Monthly payment received from insurance at current %</p>
+                  <p className="text-xs text-gray-500 mt-1">Total allowable amount per month (insurance will pay their % of this)</p>
                 </div>
 
                 <div>
@@ -2206,22 +2948,39 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
                   // Year-long simulation
                   let remainingDeductible = deductible
-                  let patientOOPTotal = 0
+                  let patientOOPTotal = 0 // Tracks all patient out-of-pocket spending
                   let totalRevenue = 0
                   const monthlyBreakdown = []
 
                   for (let month = 1; month <= 12; month++) {
-                    let insurancePayment = insurancePaidAmount
-                    let patientPayment = patientPortionPerMonth
-
-                    // Check if OOP Max has been hit
+                    // Check if OOP Max has been hit BEFORE this month
+                    let insurancePayment, patientPayment
+                    
                     if (oopMax > 0 && patientOOPTotal >= oopMax) {
-                      // Insurance now pays 100%
+                      // OOP Max already hit - insurance pays 100%
                       insurancePayment = fullAllowableAmount
                       patientPayment = 0
+                    } else {
+                      // OOP Max not yet hit - normal cost sharing
+                      insurancePayment = insurancePaidAmount
+                      patientPayment = patientPortionPerMonth
+                      
+                      // Check if patient will hit OOP max THIS month
+                      if (oopMax > 0 && (patientOOPTotal + patientPayment) > oopMax) {
+                        // Patient reaches OOP max partway through this month
+                        const remainingBeforeMax = oopMax - patientOOPTotal
+                        const percentOfMonthBeforeMax = remainingBeforeMax / patientPayment
+                        
+                        // Split the month: part at normal rate, part at 100% insurance
+                        const insuranceBeforeMax = insurancePaidAmount * percentOfMonthBeforeMax
+                        const insuranceAfterMax = fullAllowableAmount * (1 - percentOfMonthBeforeMax)
+                        
+                        insurancePayment = insuranceBeforeMax + insuranceAfterMax
+                        patientPayment = remainingBeforeMax
+                      }
                     }
 
-                    // Track patient OOP
+                    // Track patient OOP (includes both deductible and cost-share payments)
                     patientOOPTotal += patientPayment
 
                     // Apply insurance payment toward deductible first, then as revenue
@@ -2237,7 +2996,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                         monthRevenue = 0
                       }
                     } else {
-                      // Deductible already met
+                      // Deductible already met - count only insurance payment as revenue
                       monthRevenue = insurancePayment
                     }
 
@@ -2247,7 +3006,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                       insurancePayment,
                       patientPayment,
                       monthRevenue,
-                      remainingDeductible: Math.max(0, remainingDeductible)
+                      remainingDeductible: Math.max(0, remainingDeductible),
+                      oopReached: patientOOPTotal >= oopMax && oopMax > 0
                     })
                   }
 
@@ -2318,8 +3078,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
           </div>
         )}
 
-        {/* Analytics Tab - Fun Stuff */}
-        {activeTab === 'analytics' && (() => {
+        {/* Reports View */}
+        {activeView === 'reports' && (() => {
           // Calculate metrics from all qualified clients with calculator data
           const clientsWithCalc = leads.filter(l => 
             l.stage === 'qualified' && 
@@ -2333,30 +3093,31 @@ export default function AdminDashboard({ userEmail, onLogout }) {
             const deductible = parseFloat(client.calc_deductible) || 0
             const oopMax = parseFloat(client.calc_oop_max) || 0
             const percentOfAllowable = parseFloat(client.calc_percent_allowable) || 0
-            const insurancePaidAmount = parseFloat(client.calc_insurance_paid) || 0
+            const allowableAmount = parseFloat(client.calc_insurance_paid) || 0 // Now represents Allowable Amount per Month
             const costOfProduct = parseFloat(client.calc_product_cost) || 0
-
-            const fullAllowableAmount = percentOfAllowable > 0 
-              ? insurancePaidAmount / (percentOfAllowable / 100)
-              : insurancePaidAmount
-
-            const patientPortionPerMonth = fullAllowableAmount - insurancePaidAmount
 
             let remainingDeductible = deductible
             let patientOOPTotal = 0
             let totalRevenue = 0
 
             for (let month = 1; month <= 12; month++) {
-              let insurancePayment = insurancePaidAmount
-              let patientPayment = patientPortionPerMonth
-
+              // Calculate insurance payment based on whether OOP max is reached
+              let insurancePayment
+              let patientPayment
+              
               if (oopMax > 0 && patientOOPTotal >= oopMax) {
-                insurancePayment = fullAllowableAmount
+                // After OOP max: Insurance pays 100% of allowable
+                insurancePayment = allowableAmount
                 patientPayment = 0
+              } else {
+                // Before OOP max: Insurance pays their percentage of allowable
+                insurancePayment = allowableAmount * (percentOfAllowable / 100)
+                patientPayment = allowableAmount - insurancePayment
               }
 
               patientOOPTotal += patientPayment
 
+              // Calculate revenue after deductible
               let monthRevenue = 0
               if (remainingDeductible > 0) {
                 if (insurancePayment >= remainingDeductible) {
@@ -2432,6 +3193,96 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
           return (
             <div className="space-y-4 sm:space-y-6">
+              {/* Expense Management Section */}
+              <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+                <div className="flex justify-between items-center mb-6">
+                  <h2 className="text-2xl font-bold text-gray-900">💸 Expense Management</h2>
+                  <button
+                    onClick={() => setShowAddExpenseModal(true)}
+                    className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md text-sm font-medium"
+                  >
+                    + Add Expense
+                  </button>
+                </div>
+
+                {/* Monthly P&L Summary */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                  <div className="bg-green-50 border-2 border-green-500 rounded-lg p-4">
+                    <div className="text-sm font-medium text-green-800 mb-1">Revenue (from clients)</div>
+                    <div className="text-2xl font-bold text-green-700">
+                      ${totals.totalNetProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                  <div className="bg-red-50 border-2 border-red-500 rounded-lg p-4">
+                    <div className="text-sm font-medium text-red-800 mb-1">Total Expenses</div>
+                    <div className="text-2xl font-bold text-red-700">
+                      ${expenses.reduce((sum, e) => sum + parseFloat(e.amount || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                  <div className="bg-blue-50 border-2 border-blue-500 rounded-lg p-4">
+                    <div className="text-sm font-medium text-blue-800 mb-1">Net Profit</div>
+                    <div className="text-2xl font-bold text-blue-700">
+                      ${(totals.totalNetProfit - expenses.reduce((sum, e) => sum + parseFloat(e.amount || 0), 0)).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Expenses List */}
+                {expenses.length > 0 ? (
+                  <div className="border rounded-lg overflow-hidden">
+                    <table className="w-full">
+                      <thead className="bg-gray-50 border-b">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Date</th>
+                          <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Description</th>
+                          <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Category</th>
+                          <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">Amount</th>
+                          <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200">
+                        {expenses.map((expense) => (
+                          <tr key={expense.id} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm text-gray-700">
+                              {new Date(expense.date).toLocaleDateString()}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-900">{expense.description}</td>
+                            <td className="px-4 py-3 text-sm text-gray-700">
+                              <span className="px-2 py-1 bg-gray-100 rounded text-xs">{expense.category}</span>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-right font-medium text-gray-900">
+                              ${parseFloat(expense.amount).toFixed(2)}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-right">
+                              <button
+                                onClick={async () => {
+                                  if (confirm('Delete this expense?')) {
+                                    const { error } = await supabase
+                                      .from('expenses')
+                                      .delete()
+                                      .eq('id', expense.id)
+                                    if (!error) {
+                                      setExpenses(expenses.filter(e => e.id !== expense.id))
+                                    }
+                                  }
+                                }}
+                                className="text-red-600 hover:text-red-800"
+                              >
+                                Delete
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">
+                    <p>No expenses recorded yet. Click "Add Expense" to get started.</p>
+                  </div>
+                )}
+              </div>
+
               <div className="bg-white rounded-lg shadow p-4 sm:p-6">
                 <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-6 sm:mb-8 flex items-center gap-2 sm:gap-3">
                   <span>📊 Business Analytics</span>
@@ -2513,6 +3364,78 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   </div>
                 )}
 
+                {/* Client Details Table - Show clients WITH calculator data */}
+                {clientsWithCalc.length > 0 && (
+                  <div className="mt-8">
+                    <h3 className="text-xl font-bold text-gray-900 mb-4">
+                      📋 Client Profit Details ({clientsWithCalc.length} clients)
+                    </h3>
+                    <div className="bg-white border-2 border-gray-200 rounded-lg overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b-2 border-blue-200">
+                            <tr>
+                              <th className="px-4 py-3 text-left font-semibold text-gray-800">Client Name</th>
+                              <th className="px-4 py-3 text-left font-semibold text-gray-800">Insurance</th>
+                              <th className="px-4 py-3 text-right font-semibold text-gray-800">Coverage %</th>
+                              <th className="px-4 py-3 text-right font-semibold text-gray-800">Allowable/Month</th>
+                              <th className="px-4 py-3 text-right font-semibold text-gray-800">Product Cost</th>
+                              <th className="px-4 py-3 text-right font-semibold text-gray-800">Deductible</th>
+                              <th className="px-4 py-3 text-right font-semibold text-gray-800">OOP Max</th>
+                              <th className="px-4 py-3 text-right font-semibold text-gray-800">Net Profit/Year</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-200">
+                            {clientsWithCalc.map((client) => {
+                              const { grossProfit, netProfit, totalCost } = calculateClientProfit(client)
+                              const deductible = parseFloat(client.calc_deductible) || 0
+                              const oopMax = parseFloat(client.calc_oop_max) || 0
+                              const percentOfAllowable = parseFloat(client.calc_percent_allowable) || 0
+                              const insurancePaidAmount = parseFloat(client.calc_insurance_paid) || 0
+                              const costOfProduct = parseFloat(client.calc_product_cost) || 0
+                              
+                              return (
+                                <tr key={client.id} className="hover:bg-blue-50 transition-colors">
+                                  <td className="px-4 py-3 font-medium text-gray-900">{client.name}</td>
+                                  <td className="px-4 py-3 text-gray-700">{client.insurance || 'N/A'}</td>
+                                  <td className="px-4 py-3 text-right text-gray-700">{percentOfAllowable}%</td>
+                                  <td className="px-4 py-3 text-right text-gray-700">
+                                    ${insurancePaidAmount.toFixed(2)}
+                                  </td>
+                                  <td className="px-4 py-3 text-right text-gray-700">
+                                    ${costOfProduct.toFixed(2)}
+                                  </td>
+                                  <td className="px-4 py-3 text-right text-gray-700">
+                                    ${deductible.toFixed(0)}
+                                  </td>
+                                  <td className="px-4 py-3 text-right text-gray-700">
+                                    {oopMax > 0 ? `$${oopMax.toFixed(0)}` : 'N/A'}
+                                  </td>
+                                  <td className={`px-4 py-3 text-right font-bold ${
+                                    netProfit >= 0 ? 'text-green-700' : 'text-red-700'
+                                  }`}>
+                                    ${netProfit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                          <tfoot className="bg-gradient-to-r from-green-50 to-blue-50 border-t-2 border-green-300">
+                            <tr>
+                              <td colSpan="7" className="px-4 py-3 text-right font-bold text-gray-900">
+                                Total Net Profit:
+                              </td>
+                              <td className="px-4 py-3 text-right font-bold text-green-700 text-lg">
+                                ${totals.totalNetProfit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Debug Section - Show which clients need calculator data */}
                 {(() => {
                   const qualifiedClients = leads.filter(l => l.stage === 'qualified')
@@ -2551,10 +3474,552 @@ export default function AdminDashboard({ userEmail, onLogout }) {
             </div>
           )
         })()}
-      </div>
 
+        {/* Projects & Tasks View */}
+        {activeView === 'projects' && (
+          <div className="space-y-6">
+            {!viewingProjectId ? (
+              /* Project List View */
+              <>
+                <div className="bg-white rounded-lg shadow p-6">
+                  <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-2xl font-bold text-gray-900">📁 Projects</h2>
+                    <button
+                      onClick={() => {
+                        setProjectForm({ name: '', description: '', deadline: '', goal: '' })
+                        setShowAddProjectModal(true)
+                      }}
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium"
+                    >
+                      + New Project
+                    </button>
+                  </div>
+
+                  {projects.length > 0 ? (
+                    <div className="grid md:grid-cols-2 gap-4">
+                      {projects.map((project) => {
+                        const projTasks = tasks.filter(t => t.project_id === project.id)
+                        const completedTasks = projTasks.filter(t => t.status === 'completed').length
+                        const progress = projTasks.length > 0 ? (completedTasks / projTasks.length) * 100 : 0
+
+                        return (
+                          <div 
+                            key={project.id} 
+                            onClick={() => setViewingProjectId(project.id)}
+                            className="border-2 border-gray-200 rounded-lg p-4 hover:border-blue-400 transition-colors cursor-pointer"
+                          >
+                            <div className="flex justify-between items-start mb-3">
+                              <h3 className="text-lg font-bold text-gray-900">{project.name}</h3>
+                              <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                project.status === 'active' ? 'bg-green-100 text-green-700' :
+                                project.status === 'completed' ? 'bg-blue-100 text-blue-700' :
+                                'bg-gray-100 text-gray-700'
+                              }`}>
+                                {project.status}
+                              </span>
+                            </div>
+                            <p className="text-sm text-gray-600 mb-3">{project.description}</p>
+                            
+                            {project.deadline && (
+                              <p className="text-sm text-gray-500 mb-2">
+                                📅 Due: {formatDate(project.deadline)}
+                              </p>
+                            )}
+                            
+                            <div className="mb-3">
+                              <div className="flex justify-between text-sm mb-1">
+                                <span className="text-gray-600">Progress</span>
+                                <span className="font-medium">{completedTasks}/{projTasks.length} tasks</span>
+                              </div>
+                              <div className="w-full bg-gray-200 rounded-full h-2">
+                                <div 
+                                  className="bg-blue-600 h-2 rounded-full transition-all"
+                                  style={{ width: `${progress}%` }}
+                                ></div>
+                              </div>
+                            </div>
+
+                            <div className="text-sm text-blue-600 font-medium">
+                              Click to view tasks →
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-center py-12 text-gray-500">
+                      <p className="text-lg">No projects yet. Create one to get started!</p>
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              /* Single Project Detail View */
+              (() => {
+                const project = projects.find(p => p.id === viewingProjectId)
+                if (!project) return null
+                
+                const projTasks = tasks.filter(t => t.project_id === project.id)
+                const completedTasks = projTasks.filter(t => t.status === 'completed').length
+                const progress = projTasks.length > 0 ? (completedTasks / projTasks.length) * 100 : 0
+
+                return (
+                  <div className="bg-white rounded-lg shadow p-6">
+                    <button
+                      onClick={() => setViewingProjectId(null)}
+                      className="mb-4 text-blue-600 hover:text-blue-800 font-medium"
+                    >
+                      ← Back to Projects
+                    </button>
+
+                    <div className="mb-6">
+                      <div className="flex justify-between items-start mb-3">
+                        <h2 className="text-3xl font-bold text-gray-900">{project.name}</h2>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => {
+                              setEditingProject(project)
+                              setProjectForm({ 
+                                name: project.name, 
+                                description: project.description || '', 
+                                deadline: project.deadline || '', 
+                                goal: project.goal || '' 
+                              })
+                              setShowEditProjectModal(true)
+                            }}
+                            className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-medium"
+                          >
+                            ✏️ Edit
+                          </button>
+                          <span className={`px-3 py-1 rounded text-sm font-medium ${
+                            project.status === 'active' ? 'bg-green-100 text-green-700' :
+                            project.status === 'completed' ? 'bg-blue-100 text-blue-700' :
+                            'bg-gray-100 text-gray-700'
+                          }`}>
+                            {project.status}
+                          </span>
+                        </div>
+                      </div>
+                      
+                      <p className="text-gray-600 mb-4">{project.description}</p>
+                      
+                      {project.goal && (
+                        <p className="text-sm text-gray-700 mb-2">
+                          <span className="font-semibold">Goal:</span> {project.goal}
+                        </p>
+                      )}
+                      
+                      {project.deadline && (
+                        <p className="text-sm text-gray-500 mb-4">
+                          📅 Deadline: {formatDate(project.deadline)}
+                        </p>
+                      )}
+                      
+                      <div className="mb-4">
+                        <div className="flex justify-between text-sm mb-1">
+                          <span className="text-gray-600">Project Progress</span>
+                          <span className="font-medium">{completedTasks}/{projTasks.length} tasks completed ({Math.round(progress)}%)</span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-3">
+                          <div 
+                            className="bg-blue-600 h-3 rounded-full transition-all"
+                            style={{ width: `${progress}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="border-t pt-6">
+                      <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-xl font-bold text-gray-900">Tasks</h3>
+                        <button
+                          onClick={() => {
+                            setSelectedProject(project)
+                            setTaskForm({ title: '', description: '', due_date: '', priority: 'medium', project_id: project.id })
+                            setShowAddTaskModal(true)
+                          }}
+                          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium"
+                        >
+                          + Add Task
+                        </button>
+                      </div>
+
+                      {projTasks.length > 0 ? (
+                        <div className="space-y-3">
+                          {projTasks.map((task) => (
+                            <div key={task.id} className={`border-l-4 p-4 rounded ${
+                              task.status === 'completed' ? 'border-green-500 bg-green-50' :
+                              task.status === 'in-progress' ? 'border-blue-500 bg-blue-50' :
+                              task.status === 'blocked' ? 'border-red-500 bg-red-50' :
+                              'border-gray-300 bg-gray-50'
+                            }`}>
+                              <div className="flex justify-between items-start">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <h4 className={`font-semibold ${task.status === 'completed' ? 'line-through text-gray-500' : 'text-gray-900'}`}>
+                                      {task.title}
+                                    </h4>
+                                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                      task.priority === 'urgent' ? 'bg-red-100 text-red-700' :
+                                      task.priority === 'high' ? 'bg-orange-100 text-orange-700' :
+                                      task.priority === 'medium' ? 'bg-yellow-100 text-yellow-700' :
+                                      'bg-gray-100 text-gray-700'
+                                    }`}>
+                                      {task.priority}
+                                    </span>
+                                  </div>
+                                  {task.description && (
+                                    <p className="text-sm text-gray-600 mb-2">{task.description}</p>
+                                  )}
+                                  <div className="flex gap-4 text-xs text-gray-500">
+                                    {task.due_date && <span>📅 Due: {formatDate(task.due_date)}</span>}
+                                    {task.created_at && <span>Created: {formatDate(task.created_at.split('T')[0])}</span>}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setEditingTask(task)
+                                      setTaskForm({ 
+                                        title: task.title, 
+                                        description: task.description || '', 
+                                        due_date: task.due_date || '', 
+                                        priority: task.priority,
+                                        project_id: task.project_id
+                                      })
+                                      setShowEditTaskModal(true)
+                                    }}
+                                    className="text-blue-600 hover:text-blue-800 text-sm px-2 py-1"
+                                  >
+                                    ✏️
+                                  </button>
+                                  <select
+                                    value={task.status}
+                                    onChange={async (e) => {
+                                      const newStatus = e.target.value
+                                      const { error } = await supabase
+                                        .from('tasks')
+                                        .update({ 
+                                          status: newStatus,
+                                          completed_at: newStatus === 'completed' ? new Date().toISOString() : null
+                                        })
+                                        .eq('id', task.id)
+                                      if (!error) {
+                                        setTasks(tasks.map(t => t.id === task.id ? { ...t, status: newStatus } : t))
+                                      }
+                                    }}
+                                    className="text-sm border border-gray-300 rounded px-2 py-1"
+                                  >
+                                    <option value="todo">To Do</option>
+                                    <option value="in-progress">In Progress</option>
+                                    <option value="completed">Completed</option>
+                                    <option value="blocked">Blocked</option>
+                                  </select>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-center py-12 text-gray-500">
+                          <p>No tasks yet. Click "Add Task" to create one!</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })()
+            )}
+          </div>
+        )}
+
+        {/* Products View */}
+        {activeView === 'products' && (
+          <div className="bg-white rounded-lg shadow overflow-hidden">
+            <div className="p-4 border-b border-gray-200 flex justify-between items-center">
+              <h2 className="text-2xl font-bold text-gray-900">Product Catalog</h2>
+              <button
+                onClick={() => {
+                  setProductForm({ name: '', category: '', manufacturer: '', description: '', sku: '' })
+                  setShowAddProductModal(true)
+                }}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
+              >
+                + Add Product
+              </button>
+            </div>
+
+            {products.length === 0 ? (
+              <div className="p-8 text-center text-gray-500">
+                <p className="mb-4">No products in catalog yet.</p>
+                <button
+                  onClick={() => setShowAddProductModal(true)}
+                  className="text-blue-600 hover:text-blue-700 font-medium"
+                >
+                  Add your first product
+                </button>
+              </div>
+            ) : (
+              <div className="p-4">
+                {/* Group products by category */}
+                {(() => {
+                  const categories = [...new Set(products.map(p => p.category))].sort()
+                  return categories.map(category => {
+                    const categoryProducts = products.filter(p => p.category === category)
+                    return (
+                      <div key={category} className="mb-6">
+                        <h3 className="text-lg font-semibold text-gray-800 mb-3 capitalize">{category}s</h3>
+                        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                          {categoryProducts.map(product => (
+                            <div key={product.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                              <div className="flex justify-between items-start mb-2">
+                                <h4 className="font-semibold text-gray-900">{product.name}</h4>
+                                <button
+                                  onClick={() => {
+                                    setEditingProduct(product)
+                                    setProductForm({
+                                      name: product.name,
+                                      category: product.category,
+                                      manufacturer: product.manufacturer || '',
+                                      description: product.description || '',
+                                      sku: product.sku || ''
+                                    })
+                                    setShowEditProductModal(true)
+                                  }}
+                                  className="text-blue-600 hover:text-blue-700 text-sm"
+                                >
+                                  Edit
+                                </button>
+                              </div>
+                              {product.manufacturer && (
+                                <p className="text-sm text-gray-600 mb-1">by {product.manufacturer}</p>
+                              )}
+                              {product.description && (
+                                <p className="text-sm text-gray-500 mb-2">{product.description}</p>
+                              )}
+                              {product.sku && (
+                                <p className="text-xs text-gray-400">SKU: {product.sku}</p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  })
+                })()}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Shipping View */}
+        {activeView === 'shipping' && (
+          <div className="space-y-4">
+            {/* Stats Header */}
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <div className="text-sm text-yellow-700 font-medium">Pending</div>
+                <div className="text-2xl font-bold text-yellow-900">
+                  {pendingOrders.filter(o => o.status === 'pending').length}
+                </div>
+              </div>
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="text-sm text-blue-700 font-medium">Ready to Order</div>
+                <div className="text-2xl font-bold text-blue-900">
+                  {pendingOrders.filter(o => o.status === 'reviewed').length}
+                </div>
+              </div>
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <div className="text-sm text-green-700 font-medium">Shipped</div>
+                <div className="text-2xl font-bold text-green-900">
+                  {pendingOrders.filter(o => o.status === 'shipped').length}
+                </div>
+              </div>
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <div className="text-sm text-gray-700 font-medium">Total Orders</div>
+                <div className="text-2xl font-bold text-gray-900">
+                  {pendingOrders.length}
+                </div>
+              </div>
+            </div>
+
+            {/* Main Queue */}
+            <div className="bg-white rounded-lg shadow overflow-hidden">
+              <div className="p-4 border-b border-gray-200">
+                <h2 className="text-2xl font-bold text-gray-900 mb-2">Shipping Queue</h2>
+                <p className="text-sm text-gray-600">
+                  Upcoming shipments organized by timeline
+                </p>
+              </div>
+
+              {pendingOrders.length === 0 ? (
+                <div className="p-8 text-center text-gray-500">
+                  <p className="mb-2">No pending orders at this time.</p>
+                  <p className="text-sm">Orders will appear here automatically when clients are due for shipment.</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-200">
+                  {(() => {
+                    const today = new Date();
+                    const todayStr = today.toISOString().split('T')[0];
+                    const weekFromNow = new Date(today);
+                    weekFromNow.setDate(weekFromNow.getDate() + 7);
+                    const weekFromNowStr = weekFromNow.toISOString().split('T')[0];
+                    
+                    const todayOrders = pendingOrders.filter(o => o.ship_date === todayStr && o.status !== 'shipped');
+                    const thisWeekOrders = pendingOrders.filter(o => o.ship_date > todayStr && o.ship_date <= weekFromNowStr && o.status !== 'shipped');
+                    const laterOrders = pendingOrders.filter(o => o.ship_date > weekFromNowStr && o.status !== 'shipped');
+                    const shippedOrders = pendingOrders.filter(o => o.status === 'shipped');
+                    
+                    const renderOrders = (orders, title, showDate = true) => (
+                      orders.length > 0 && (
+                        <div>
+                          <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                            <h3 className="font-semibold text-gray-900">{title} ({orders.length})</h3>
+                          </div>
+                          {orders.map(order => (
+                            <div key={order.id} className="p-4 hover:bg-gray-50 border-b border-gray-100 last:border-b-0">
+                              <div className="flex justify-between items-start mb-3">
+                                <div className="flex-1">
+                                  <h3 className="font-semibold text-lg text-gray-900">{order.leads?.name}</h3>
+                                  {showDate && (
+                                    <p className="text-sm text-gray-600 mt-1">
+                                      📅 Ship: <span className="font-medium">{formatDate(order.ship_date)}</span>
+                                    </p>
+                                  )}
+                                  {order.status === 'shipped' && order.tracking_number && (
+                                    <p className="text-sm text-green-600 mt-1">
+                                      📦 Tracking: <span className="font-mono">{order.tracking_number}</span>
+                                    </p>
+                                  )}
+                                  {order.leads && (
+                                    <p className="text-xs text-gray-500 mt-1">
+                                      📍 {order.leads.address_line1}, {order.leads.city}, {order.leads.state} {order.leads.zip_code}
+                                    </p>
+                                  )}
+                                </div>
+                                <span className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap ml-4 ${
+                                  order.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                                  order.status === 'reviewed' ? 'bg-blue-100 text-blue-800' :
+                                  order.status === 'shipped' ? 'bg-green-100 text-green-800' :
+                                  'bg-gray-100 text-gray-800'
+                                }`}>
+                                  {order.status}
+                                </span>
+                              </div>
+
+                              {order.pending_order_items && order.pending_order_items.length > 0 && (
+                                <div className="mb-3 ml-4">
+                                  <div className="flex flex-wrap gap-2">
+                                    {order.pending_order_items.map(item => (
+                                      <div key={item.id} className="flex items-center gap-2 text-sm bg-blue-50 px-3 py-1.5 rounded-md border border-blue-200">
+                                        <span className="font-medium text-blue-900">
+                                          {item.products?.name}
+                                        </span>
+                                        <span className="text-blue-700">× {item.quantity}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {order.status !== 'shipped' && (
+                                <div className="flex gap-2 flex-wrap">
+                                  <button
+                                    onClick={async () => {
+                                      if (confirm('Mark this order as reviewed and ready to place?')) {
+                                        try {
+                                          const { error } = await supabase
+                                            .from('pending_orders')
+                                            .update({ status: 'reviewed' })
+                                            .eq('id', order.id)
+                                          if (error) throw error
+                                          await fetchPendingOrders()
+                                        } catch (error) {
+                                          console.error('Error updating order:', error)
+                                          alert('Failed to update order status')
+                                        }
+                                      }
+                                    }}
+                                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium"
+                                  >
+                                    ✓ Review Order
+                                  </button>
+                                  <button
+                                    onClick={async () => {
+                                      const trackingNumber = prompt('Enter tracking number:')
+                                      if (trackingNumber) {
+                                        try {
+                                          const { error } = await supabase
+                                            .from('pending_orders')
+                                            .update({ 
+                                              status: 'shipped',
+                                              tracking_number: trackingNumber,
+                                              shipped_at: new Date().toISOString()
+                                            })
+                                            .eq('id', order.id)
+                                          if (error) throw error
+                                          await fetchPendingOrders()
+                                          alert('Order marked as shipped!')
+                                        } catch (error) {
+                                          console.error('Error updating order:', error)
+                                          alert('Failed to mark as shipped')
+                                        }
+                                      }
+                                    }}
+                                    className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium"
+                                  >
+                                    📦 Mark Shipped
+                                  </button>
+                                  <button
+                                    onClick={async () => {
+                                      if (confirm('Cancel this order?')) {
+                                        try {
+                                          const { error } = await supabase
+                                            .from('pending_orders')
+                                            .update({ status: 'cancelled' })
+                                            .eq('id', order.id)
+                                          if (error) throw error
+                                          await fetchPendingOrders()
+                                        } catch (error) {
+                                          console.error('Error cancelling order:', error)
+                                          alert('Failed to cancel order')
+                                        }
+                                      }
+                                    }}
+                                    className="px-4 py-2 bg-red-100 text-red-700 rounded-md hover:bg-red-200 text-sm font-medium"
+                                  >
+                                    ✕ Cancel
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )
+                    );
+
+                    return (
+                      <>
+                        {renderOrders(todayOrders, '🔥 Due Today')}
+                        {renderOrders(thisWeekOrders, '📅 This Week (Next 7 Days)')}
+                        {renderOrders(laterOrders, '📆 Later')}
+                        {renderOrders(shippedOrders, '✅ Shipped', false)}
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        </div> {/* End View Content (p-6) */}
+      </div> {/* End Main Content (flex-1) */}
+
+      {/* Modals - All modals are siblings at main container level */}
       {/* Edit Doctor Modal */}
-      {showEditDrModal && (
+      {showEditDrModal && editingDoctor && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
           <div className="bg-white rounded-lg p-6 w-full max-w-2xl my-8 max-h-[90vh] overflow-y-auto">
             <h3 className="text-xl font-bold text-gray-900 mb-4">Edit Doctor</h3>
@@ -3434,6 +4899,775 @@ export default function AdminDashboard({ userEmail, onLogout }) {
           </div>
         </div>
       )}
+
+      {/* Add Product Modal */}
+      {showAddProductModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-xl font-bold text-gray-900 mb-4">Add New Product</h3>
+            <form onSubmit={async (e) => {
+              e.preventDefault()
+              try {
+                const { error } = await supabase
+                  .from('products')
+                  .insert([{
+                    name: productForm.name,
+                    category: productForm.category,
+                    manufacturer: productForm.manufacturer,
+                    description: productForm.description,
+                    sku: productForm.sku
+                  }])
+                if (error) throw error
+                await fetchProducts()
+                setShowAddProductModal(false)
+                setProductForm({ name: '', category: '', manufacturer: '', description: '', sku: '' })
+              } catch (error) {
+                console.error('Error adding product:', error)
+                alert('Failed to add product')
+              }
+            }} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Product Name *</label>
+                <input
+                  type="text"
+                  value={productForm.name}
+                  onChange={(e) => setProductForm({ ...productForm, name: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="e.g., Dexcom G7 Sensors"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Category *</label>
+                <select
+                  value={productForm.category}
+                  onChange={(e) => setProductForm({ ...productForm, category: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Select category</option>
+                  <option value="sensor">Sensor</option>
+                  <option value="pod">Pod</option>
+                  <option value="tubing">Tubing</option>
+                  <option value="supply">Supply</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Manufacturer</label>
+                <input
+                  type="text"
+                  value={productForm.manufacturer}
+                  onChange={(e) => setProductForm({ ...productForm, manufacturer: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="e.g., Dexcom"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <textarea
+                  value={productForm.description}
+                  onChange={(e) => setProductForm({ ...productForm, description: e.target.value })}
+                  rows="2"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Product details..."
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">SKU</label>
+                <input
+                  type="text"
+                  value={productForm.sku}
+                  onChange={(e) => setProductForm({ ...productForm, sku: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Product SKU"
+                />
+              </div>
+              <div className="flex gap-3 justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddProductModal(false)
+                    setProductForm({ name: '', category: '', manufacturer: '', description: '', sku: '' })
+                  }}
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                >
+                  Add Product
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Product Modal */}
+      {showEditProductModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-xl font-bold text-gray-900 mb-4">Edit Product</h3>
+            <form onSubmit={async (e) => {
+              e.preventDefault()
+              try {
+                const { error } = await supabase
+                  .from('products')
+                  .update({
+                    name: productForm.name,
+                    category: productForm.category,
+                    manufacturer: productForm.manufacturer,
+                    description: productForm.description,
+                    sku: productForm.sku
+                  })
+                  .eq('id', editingProduct.id)
+                if (error) throw error
+                await fetchProducts()
+                setShowEditProductModal(false)
+                setEditingProduct(null)
+                setProductForm({ name: '', category: '', manufacturer: '', description: '', sku: '' })
+              } catch (error) {
+                console.error('Error updating product:', error)
+                alert('Failed to update product')
+              }
+            }} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Product Name *</label>
+                <input
+                  type="text"
+                  value={productForm.name}
+                  onChange={(e) => setProductForm({ ...productForm, name: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Category *</label>
+                <select
+                  value={productForm.category}
+                  onChange={(e) => setProductForm({ ...productForm, category: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="sensor">Sensor</option>
+                  <option value="pod">Pod</option>
+                  <option value="tubing">Tubing</option>
+                  <option value="supply">Supply</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Manufacturer</label>
+                <input
+                  type="text"
+                  value={productForm.manufacturer}
+                  onChange={(e) => setProductForm({ ...productForm, manufacturer: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <textarea
+                  value={productForm.description}
+                  onChange={(e) => setProductForm({ ...productForm, description: e.target.value })}
+                  rows="2"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">SKU</label>
+                <input
+                  type="text"
+                  value={productForm.sku}
+                  onChange={(e) => setProductForm({ ...productForm, sku: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div className="flex gap-3 justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditProductModal(false)
+                    setEditingProduct(null)
+                    setProductForm({ name: '', category: '', manufacturer: '', description: '', sku: '' })
+                  }}
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Assign Products Modal */}
+      {showAssignProductModal && assignProductClient && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-xl font-bold text-gray-900 mb-4">
+              Assign Product to {assignProductClient.name}
+            </h3>
+            <form onSubmit={async (e) => {
+              e.preventDefault()
+              try {
+                const { error } = await supabase
+                  .from('client_products')
+                  .insert([{
+                    lead_id: assignProductClient.id,
+                    product_id: assignProductForm.product_id,
+                    quantity: parseInt(assignProductForm.quantity),
+                    frequency_days: parseInt(assignProductForm.frequency_days)
+                  }])
+                if (error) throw error
+                await fetchClientProducts(assignProductClient.id)
+                setShowAssignProductModal(false)
+                setAssignProductForm({ product_id: '', quantity: 1, frequency_days: 30 })
+                alert('Product assigned successfully!')
+              } catch (error) {
+                console.error('Error assigning product:', error)
+                alert('Failed to assign product')
+              }
+            }} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Product *</label>
+                <select
+                  value={assignProductForm.product_id}
+                  onChange={(e) => setAssignProductForm({ ...assignProductForm, product_id: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Select a product</option>
+                  {products.map(product => (
+                    <option key={product.id} value={product.id}>
+                      {product.name} ({product.category})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Quantity per shipment *</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={assignProductForm.quantity}
+                  onChange={(e) => setAssignProductForm({ ...assignProductForm, quantity: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Shipping Frequency *</label>
+                <select
+                  value={assignProductForm.frequency_days}
+                  onChange={(e) => setAssignProductForm({ ...assignProductForm, frequency_days: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="30">Every 30 days (Monthly)</option>
+                  <option value="90">Every 90 days (Quarterly)</option>
+                  <option value="60">Every 60 days</option>
+                  <option value="14">Every 14 days</option>
+                </select>
+              </div>
+              <div className="flex gap-3 justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAssignProductModal(false)
+                    setAssignProductClient(null)
+                    setAssignProductForm({ product_id: '', quantity: 1, frequency_days: 30 })
+                  }}
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                >
+                  Assign Product
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Project Modal */}
+      {showAddProjectModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-xl font-bold text-gray-900 mb-4">Create New Project</h3>
+            <form onSubmit={async (e) => {
+              e.preventDefault()
+              try {
+                const { error } = await supabase
+                  .from('projects')
+                  .insert([projectForm])
+                if (error) throw error
+                await fetchProjects()
+                setShowAddProjectModal(false)
+                setProjectForm({ name: '', description: '', deadline: '', goal: '' })
+                alert('Project created successfully!')
+              } catch (error) {
+                console.error('Error creating project:', error)
+                alert('Failed to create project')
+              }
+            }} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Project Name *</label>
+                <input
+                  type="text"
+                  value={projectForm.name}
+                  onChange={(e) => setProjectForm({ ...projectForm, name: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Website Redesign"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <textarea
+                  value={projectForm.description}
+                  onChange={(e) => setProjectForm({ ...projectForm, description: e.target.value })}
+                  rows="3"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="What is this project about?"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Goal</label>
+                <input
+                  type="text"
+                  value={projectForm.goal}
+                  onChange={(e) => setProjectForm({ ...projectForm, goal: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Increase conversions by 20%"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Deadline</label>
+                <input
+                  type="date"
+                  value={projectForm.deadline}
+                  onChange={(e) => setProjectForm({ ...projectForm, deadline: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div className="flex gap-3 justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddProjectModal(false)
+                    setProjectForm({ name: '', description: '', deadline: '', goal: '' })
+                  }}
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                >
+                  Create Project
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Project Modal */}
+      {showEditProjectModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-xl font-bold text-gray-900 mb-4">Edit Project</h3>
+            <form onSubmit={async (e) => {
+              e.preventDefault()
+              try {
+                const { error } = await supabase
+                  .from('projects')
+                  .update({
+                    name: projectForm.name,
+                    description: projectForm.description,
+                    deadline: projectForm.deadline,
+                    goal: projectForm.goal
+                  })
+                  .eq('id', editingProject.id)
+                if (error) throw error
+                await fetchProjects()
+                setShowEditProjectModal(false)
+                setEditingProject(null)
+                setProjectForm({ name: '', description: '', deadline: '', goal: '' })
+                alert('Project updated successfully!')
+              } catch (error) {
+                console.error('Error updating project:', error)
+                alert('Failed to update project')
+              }
+            }} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Project Name *</label>
+                <input
+                  type="text"
+                  value={projectForm.name}
+                  onChange={(e) => setProjectForm({ ...projectForm, name: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Website Redesign"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <textarea
+                  value={projectForm.description}
+                  onChange={(e) => setProjectForm({ ...projectForm, description: e.target.value })}
+                  rows="3"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="What is this project about?"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Goal</label>
+                <input
+                  type="text"
+                  value={projectForm.goal}
+                  onChange={(e) => setProjectForm({ ...projectForm, goal: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Increase conversions by 20%"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Deadline</label>
+                <input
+                  type="date"
+                  value={projectForm.deadline}
+                  onChange={(e) => setProjectForm({ ...projectForm, deadline: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div className="flex gap-3 justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditProjectModal(false)
+                    setEditingProject(null)
+                    setProjectForm({ name: '', description: '', deadline: '', goal: '' })
+                  }}
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Task Modal */}
+      {showAddTaskModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-xl font-bold text-gray-900 mb-4">Add Task to {selectedProject?.name}</h3>
+            <form onSubmit={async (e) => {
+              e.preventDefault()
+              try {
+                const { error } = await supabase
+                  .from('tasks')
+                  .insert([taskForm])
+                if (error) throw error
+                await fetchTasks()
+                setShowAddTaskModal(false)
+                setSelectedProject(null)
+                setTaskForm({ title: '', description: '', due_date: '', priority: 'medium', project_id: '' })
+                alert('Task added successfully!')
+              } catch (error) {
+                console.error('Error creating task:', error)
+                alert('Failed to create task')
+              }
+            }} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Task Title *</label>
+                <input
+                  type="text"
+                  value={taskForm.title}
+                  onChange={(e) => setTaskForm({ ...taskForm, title: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Design homepage mockup"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <textarea
+                  value={taskForm.description}
+                  onChange={(e) => setTaskForm({ ...taskForm, description: e.target.value })}
+                  rows="3"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Task details..."
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Priority *</label>
+                  <select
+                    value={taskForm.priority}
+                    onChange={(e) => setTaskForm({ ...taskForm, priority: e.target.value })}
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                    <option value="urgent">Urgent</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Due Date</label>
+                  <input
+                    type="date"
+                    value={taskForm.due_date}
+                    onChange={(e) => setTaskForm({ ...taskForm, due_date: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-3 justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddTaskModal(false)
+                    setSelectedProject(null)
+                    setTaskForm({ title: '', description: '', due_date: '', priority: 'medium', project_id: '' })
+                  }}
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                >
+                  Add Task
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Task Modal */}
+      {showEditTaskModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-xl font-bold text-gray-900 mb-4">Edit Task</h3>
+            <form onSubmit={async (e) => {
+              e.preventDefault()
+              try {
+                const { error } = await supabase
+                  .from('tasks')
+                  .update({
+                    title: taskForm.title,
+                    description: taskForm.description,
+                    due_date: taskForm.due_date,
+                    priority: taskForm.priority
+                  })
+                  .eq('id', editingTask.id)
+                if (error) throw error
+                await fetchTasks()
+                setShowEditTaskModal(false)
+                setEditingTask(null)
+                setTaskForm({ title: '', description: '', due_date: '', priority: 'medium', project_id: '' })
+                alert('Task updated successfully!')
+              } catch (error) {
+                console.error('Error updating task:', error)
+                alert('Failed to update task')
+              }
+            }} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Task Title *</label>
+                <input
+                  type="text"
+                  value={taskForm.title}
+                  onChange={(e) => setTaskForm({ ...taskForm, title: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Design homepage mockup"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <textarea
+                  value={taskForm.description}
+                  onChange={(e) => setTaskForm({ ...taskForm, description: e.target.value })}
+                  rows="3"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Task details..."
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Priority *</label>
+                  <select
+                    value={taskForm.priority}
+                    onChange={(e) => setTaskForm({ ...taskForm, priority: e.target.value })}
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                    <option value="urgent">Urgent</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Due Date</label>
+                  <input
+                    type="date"
+                    value={taskForm.due_date}
+                    onChange={(e) => setTaskForm({ ...taskForm, due_date: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-3 justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditTaskModal(false)
+                    setEditingTask(null)
+                    setTaskForm({ title: '', description: '', due_date: '', priority: 'medium', project_id: '' })
+                  }}
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Expense Modal */}
+      {showAddExpenseModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-xl font-bold text-gray-900 mb-4">Add Expense</h3>
+            <form onSubmit={async (e) => {
+              e.preventDefault()
+              try {
+                const { error } = await supabase
+                  .from('expenses')
+                  .insert([expenseForm])
+                if (error) throw error
+                await fetchExpenses()
+                setShowAddExpenseModal(false)
+                setExpenseForm({ description: '', amount: '', category: '', date: '' })
+                alert('Expense added successfully!')
+              } catch (error) {
+                console.error('Error adding expense:', error)
+                alert('Failed to add expense')
+              }
+            }} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Description *</label>
+                <input
+                  type="text"
+                  value={expenseForm.description}
+                  onChange={(e) => setExpenseForm({ ...expenseForm, description: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Office rent, supplies, etc."
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Amount *</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={expenseForm.amount}
+                    onChange={(e) => setExpenseForm({ ...expenseForm, amount: e.target.value })}
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="0.00"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Date *</label>
+                  <input
+                    type="date"
+                    value={expenseForm.date}
+                    onChange={(e) => setExpenseForm({ ...expenseForm, date: e.target.value })}
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Category *</label>
+                <select
+                  value={expenseForm.category}
+                  onChange={(e) => setExpenseForm({ ...expenseForm, category: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Select category...</option>
+                  <option value="Rent">Rent</option>
+                  <option value="Medical Supplies">Medical Supplies</option>
+                  <option value="Software">Software</option>
+                  <option value="Marketing">Marketing</option>
+                  <option value="Utilities">Utilities</option>
+                  <option value="Insurance">Insurance</option>
+                  <option value="Salaries">Salaries</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div className="flex gap-3 justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddExpenseModal(false)
+                    setExpenseForm({ description: '', amount: '', category: '', date: '' })
+                  }}
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
+                >
+                  Add Expense
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
+
