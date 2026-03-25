@@ -120,12 +120,30 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const [viewingProjectId, setViewingProjectId] = useState(null)
   const [projectForm, setProjectForm] = useState({ name: '', description: '', deadline: '', goal: '' })
   const [taskForm, setTaskForm] = useState({ title: '', description: '', due_date: '', priority: 'medium', project_id: '' })
+  const ALL_TASKS_VIEW_ID = 'all-tasks-folder'
 
   // Helper function to format dates without timezone conversion
   const formatDate = (dateString) => {
     if (!dateString) return ''
     const date = new Date(dateString + 'T00:00:00')
     return date.toLocaleDateString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric' })
+  }
+
+  const getLocalTodayDateString = () => {
+    const today = new Date()
+    const year = today.getFullYear()
+    const month = String(today.getMonth() + 1).padStart(2, '0')
+    const day = String(today.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+
+  const sortTasksByDueDate = (firstTask, secondTask) => {
+    if (!firstTask.due_date && !secondTask.due_date) {
+      return new Date(secondTask.created_at || 0) - new Date(firstTask.created_at || 0)
+    }
+    if (!firstTask.due_date) return 1
+    if (!secondTask.due_date) return -1
+    return firstTask.due_date.localeCompare(secondTask.due_date)
   }
 
   // Expenses & Revenue State
@@ -271,6 +289,26 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     } catch (error) {
       console.error('Error fetching tasks:', error)
     }
+  }
+
+  const updateTaskStatus = async (taskId, newStatus) => {
+    if (!supabase) return
+
+    const { error } = await supabase
+      .from('tasks')
+      .update({
+        status: newStatus,
+        completed_at: newStatus === 'completed' ? new Date().toISOString() : null
+      })
+      .eq('id', taskId)
+
+    if (error) {
+      console.error('Error updating task status:', error)
+      alert('Failed to update task status')
+      return
+    }
+
+    setTasks(prevTasks => prevTasks.map(task => task.id === taskId ? { ...task, status: newStatus } : task))
   }
 
   const fetchExpenses = async () => {
@@ -1249,6 +1287,15 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
   const allLeads = activeTab === 'leads' ? filteredLeads : leads // Show filtered leads in Leads tab
   const qualifiedLeads = leads.filter(lead => lead.stage === 'qualified')
+  const todayDateString = getLocalTodayDateString()
+  const todayTasks = tasks
+    .filter(task => task.due_date === todayDateString)
+    .sort(sortTasksByDueDate)
+  const activeTasks = tasks.filter(task => task.status !== 'completed')
+  const projectNamesById = projects.reduce((acc, project) => {
+    acc[project.id] = project.name
+    return acc
+  }, {})
 
   if (loading) {
     return (
@@ -1565,6 +1612,41 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                     })()}
                   </div>
                 </div>
+              </div>
+
+              {/* Tasks for Today */}
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900">Tasks for Today</h3>
+                  <span className="text-sm text-gray-500">
+                    {todayTasks.filter(task => task.status !== 'completed').length} remaining
+                  </span>
+                </div>
+
+                {todayTasks.length > 0 ? (
+                  <div className="space-y-3">
+                    {todayTasks.map((task) => (
+                      <label key={task.id} className="flex items-start gap-3 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={task.status === 'completed'}
+                          onChange={(e) => updateTaskStatus(task.id, e.target.checked ? 'completed' : 'todo')}
+                          className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-sm font-medium ${task.status === 'completed' ? 'line-through text-gray-500' : 'text-gray-900'}`}>
+                            {task.title}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-1">
+                            {projectNamesById[task.project_id] || 'No Project'}
+                          </p>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">No tasks due today.</p>
+                )}
               </div>
 
               {/* Recent Activity */}
@@ -3495,59 +3577,87 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                     </button>
                   </div>
 
-                  {projects.length > 0 ? (
-                    <div className="grid md:grid-cols-2 gap-4">
-                      {projects.map((project) => {
-                        const projTasks = tasks.filter(t => t.project_id === project.id)
-                        const completedTasks = projTasks.filter(t => t.status === 'completed').length
-                        const progress = projTasks.length > 0 ? (completedTasks / projTasks.length) * 100 : 0
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div
+                      onClick={() => setViewingProjectId(ALL_TASKS_VIEW_ID)}
+                      className="border-2 border-gray-200 rounded-lg p-4 hover:border-blue-400 transition-colors cursor-pointer"
+                    >
+                      <div className="flex justify-between items-start mb-3">
+                        <h3 className="text-lg font-bold text-gray-900">📂 All Tasks</h3>
+                        <span className="px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-700">
+                          {tasks.length} total
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-600 mb-3">View every task organized by due date.</p>
+                      <div className="mb-3">
+                        <div className="flex justify-between text-sm mb-1">
+                          <span className="text-gray-600">Open Tasks</span>
+                          <span className="font-medium">{activeTasks.length}</span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-2">
+                          <div
+                            className="bg-blue-600 h-2 rounded-full transition-all"
+                            style={{ width: `${tasks.length > 0 ? ((tasks.length - activeTasks.length) / tasks.length) * 100 : 0}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                      <div className="text-sm text-blue-600 font-medium">
+                        Click to view all tasks →
+                      </div>
+                    </div>
 
-                        return (
-                          <div 
-                            key={project.id} 
-                            onClick={() => setViewingProjectId(project.id)}
-                            className="border-2 border-gray-200 rounded-lg p-4 hover:border-blue-400 transition-colors cursor-pointer"
-                          >
-                            <div className="flex justify-between items-start mb-3">
-                              <h3 className="text-lg font-bold text-gray-900">{project.name}</h3>
-                              <span className={`px-2 py-1 rounded text-xs font-medium ${
-                                project.status === 'active' ? 'bg-green-100 text-green-700' :
-                                project.status === 'completed' ? 'bg-blue-100 text-blue-700' :
-                                'bg-gray-100 text-gray-700'
-                              }`}>
-                                {project.status}
-                              </span>
-                            </div>
-                            <p className="text-sm text-gray-600 mb-3">{project.description}</p>
-                            
-                            {project.deadline && (
-                              <p className="text-sm text-gray-500 mb-2">
-                                📅 Due: {formatDate(project.deadline)}
-                              </p>
-                            )}
-                            
-                            <div className="mb-3">
-                              <div className="flex justify-between text-sm mb-1">
-                                <span className="text-gray-600">Progress</span>
-                                <span className="font-medium">{completedTasks}/{projTasks.length} tasks</span>
-                              </div>
-                              <div className="w-full bg-gray-200 rounded-full h-2">
-                                <div 
-                                  className="bg-blue-600 h-2 rounded-full transition-all"
-                                  style={{ width: `${progress}%` }}
-                                ></div>
-                              </div>
-                            </div>
+                    {projects.map((project) => {
+                      const projTasks = tasks.filter(t => t.project_id === project.id)
+                      const completedTasks = projTasks.filter(t => t.status === 'completed').length
+                      const progress = projTasks.length > 0 ? (completedTasks / projTasks.length) * 100 : 0
 
-                            <div className="text-sm text-blue-600 font-medium">
-                              Click to view tasks →
+                      return (
+                        <div
+                          key={project.id}
+                          onClick={() => setViewingProjectId(project.id)}
+                          className="border-2 border-gray-200 rounded-lg p-4 hover:border-blue-400 transition-colors cursor-pointer"
+                        >
+                          <div className="flex justify-between items-start mb-3">
+                            <h3 className="text-lg font-bold text-gray-900">{project.name}</h3>
+                            <span className={`px-2 py-1 rounded text-xs font-medium ${
+                              project.status === 'active' ? 'bg-green-100 text-green-700' :
+                              project.status === 'completed' ? 'bg-blue-100 text-blue-700' :
+                              'bg-gray-100 text-gray-700'
+                            }`}>
+                              {project.status}
+                            </span>
+                          </div>
+                          <p className="text-sm text-gray-600 mb-3">{project.description}</p>
+
+                          {project.deadline && (
+                            <p className="text-sm text-gray-500 mb-2">
+                              📅 Due: {formatDate(project.deadline)}
+                            </p>
+                          )}
+
+                          <div className="mb-3">
+                            <div className="flex justify-between text-sm mb-1">
+                              <span className="text-gray-600">Progress</span>
+                              <span className="font-medium">{completedTasks}/{projTasks.length} tasks</span>
+                            </div>
+                            <div className="w-full bg-gray-200 rounded-full h-2">
+                              <div
+                                className="bg-blue-600 h-2 rounded-full transition-all"
+                                style={{ width: `${progress}%` }}
+                              ></div>
                             </div>
                           </div>
-                        )
-                      })}
-                    </div>
-                  ) : (
-                    <div className="text-center py-12 text-gray-500">
+
+                          <div className="text-sm text-blue-600 font-medium">
+                            Click to view tasks →
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {projects.length === 0 && (
+                    <div className="text-center pt-6 text-gray-500">
                       <p className="text-lg">No projects yet. Create one to get started!</p>
                     </div>
                   )}
@@ -3556,6 +3666,116 @@ export default function AdminDashboard({ userEmail, onLogout }) {
             ) : (
               /* Single Project Detail View */
               (() => {
+                if (viewingProjectId === ALL_TASKS_VIEW_ID) {
+                  const sortedTasks = [...tasks].sort(sortTasksByDueDate)
+                  const groupedTasks = sortedTasks.reduce((groups, task) => {
+                    const groupKey = task.due_date || 'no_due_date'
+                    if (!groups[groupKey]) groups[groupKey] = []
+                    groups[groupKey].push(task)
+                    return groups
+                  }, {})
+
+                  return (
+                    <div className="bg-white rounded-lg shadow p-6">
+                      <button
+                        onClick={() => setViewingProjectId(null)}
+                        className="mb-4 text-blue-600 hover:text-blue-800 font-medium"
+                      >
+                        ← Back to Projects
+                      </button>
+
+                      <div className="mb-6">
+                        <h2 className="text-3xl font-bold text-gray-900">All Tasks</h2>
+                        <p className="text-sm text-gray-600 mt-1">
+                          {activeTasks.length} open • {tasks.length} total
+                        </p>
+                      </div>
+
+                      {sortedTasks.length > 0 ? (
+                        <div className="space-y-6">
+                          {Object.entries(groupedTasks).map(([dueDate, dueDateTasks]) => (
+                            <div key={dueDate}>
+                              <h3 className="text-lg font-semibold text-gray-800 mb-3">
+                                📅 {dueDate === 'no_due_date' ? 'No Due Date' : formatDate(dueDate)}
+                              </h3>
+
+                              <div className="space-y-3">
+                                {dueDateTasks.map((task) => (
+                                  <div key={task.id} className={`border-l-4 p-4 rounded ${
+                                    task.status === 'completed' ? 'border-green-500 bg-green-50' :
+                                    task.status === 'in-progress' ? 'border-blue-500 bg-blue-50' :
+                                    task.status === 'blocked' ? 'border-red-500 bg-red-50' :
+                                    'border-gray-300 bg-gray-50'
+                                  }`}>
+                                    <div className="flex justify-between items-start">
+                                      <div className="flex-1">
+                                        <div className="flex items-center gap-2 mb-1">
+                                          <h4 className={`font-semibold ${task.status === 'completed' ? 'line-through text-gray-500' : 'text-gray-900'}`}>
+                                            {task.title}
+                                          </h4>
+                                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                            task.priority === 'urgent' ? 'bg-red-100 text-red-700' :
+                                            task.priority === 'high' ? 'bg-orange-100 text-orange-700' :
+                                            task.priority === 'medium' ? 'bg-yellow-100 text-yellow-700' :
+                                            'bg-gray-100 text-gray-700'
+                                          }`}>
+                                            {task.priority}
+                                          </span>
+                                        </div>
+                                        {task.description && (
+                                          <p className="text-sm text-gray-600 mb-2">{task.description}</p>
+                                        )}
+                                        <div className="flex flex-wrap gap-4 text-xs text-gray-500">
+                                          <span>📁 {projectNamesById[task.project_id] || 'No Project'}</span>
+                                          {task.due_date && <span>📅 Due: {formatDate(task.due_date)}</span>}
+                                          {task.created_at && <span>Created: {formatDate(task.created_at.split('T')[0])}</span>}
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            setEditingTask(task)
+                                            setTaskForm({
+                                              title: task.title,
+                                              description: task.description || '',
+                                              due_date: task.due_date || '',
+                                              priority: task.priority,
+                                              project_id: task.project_id
+                                            })
+                                            setShowEditTaskModal(true)
+                                          }}
+                                          className="text-blue-600 hover:text-blue-800 text-sm px-2 py-1"
+                                        >
+                                          ✏️
+                                        </button>
+                                        <select
+                                          value={task.status}
+                                          onChange={(e) => updateTaskStatus(task.id, e.target.value)}
+                                          className="text-sm border border-gray-300 rounded px-2 py-1"
+                                        >
+                                          <option value="todo">To Do</option>
+                                          <option value="in-progress">In Progress</option>
+                                          <option value="completed">Completed</option>
+                                          <option value="blocked">Blocked</option>
+                                        </select>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-center py-12 text-gray-500">
+                          <p>No tasks yet. Add tasks inside a project to get started.</p>
+                        </div>
+                      )}
+                    </div>
+                  )
+                }
+
                 const project = projects.find(p => p.id === viewingProjectId)
                 if (!project) return null
                 
@@ -3696,19 +3916,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                                   </button>
                                   <select
                                     value={task.status}
-                                    onChange={async (e) => {
-                                      const newStatus = e.target.value
-                                      const { error } = await supabase
-                                        .from('tasks')
-                                        .update({ 
-                                          status: newStatus,
-                                          completed_at: newStatus === 'completed' ? new Date().toISOString() : null
-                                        })
-                                        .eq('id', task.id)
-                                      if (!error) {
-                                        setTasks(tasks.map(t => t.id === task.id ? { ...t, status: newStatus } : t))
-                                      }
-                                    }}
+                                    onChange={(e) => updateTaskStatus(task.id, e.target.value)}
                                     className="text-sm border border-gray-300 rounded px-2 py-1"
                                   >
                                     <option value="todo">To Do</option>
