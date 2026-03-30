@@ -1,13 +1,39 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { generatePhysicianOrder, downloadPDF } from '../lib/generatePhysicianOrder'
+import { calculateInsuranceProjection } from '../lib/insuranceProjection'
 
-// Helper function to format date without timezone issues
-const formatDate = (dateString) => {
-  if (!dateString) return ''
-  // Parse YYYY-MM-DD format directly without timezone conversion
-  const [year, month, day] = dateString.split('T')[0].split('-')
-  const date = new Date(year, month - 1, day)
+const parseDateInput = (value) => {
+  if (!value) return null
+
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value
+  }
+
+  const raw = String(value).trim()
+  if (!raw) return null
+
+  const isoDateMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (isoDateMatch) {
+    const [, year, month, day] = isoDateMatch
+    const parsed = new Date(Number(year), Number(month) - 1, Number(day))
+    return Number.isNaN(parsed.getTime()) ? null : parsed
+  }
+
+  const usDateMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (usDateMatch) {
+    const [, month, day, year] = usDateMatch
+    const parsed = new Date(Number(year), Number(month) - 1, Number(day))
+    return Number.isNaN(parsed.getTime()) ? null : parsed
+  }
+
+  const fallback = new Date(raw)
+  return Number.isNaN(fallback.getTime()) ? null : fallback
+}
+
+const formatDisplayDate = (value) => {
+  const date = parseDateInput(value)
+  if (!date) return 'N/A'
   return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
 }
 
@@ -63,8 +89,6 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     state: '', 
     zip_code: '' 
   })
-  const [showShippingModal, setShowShippingModal] = useState(false)
-  const [shippingClient, setShippingClient] = useState(null)
   const [selectedCalcClient, setSelectedCalcClient] = useState(null)
   const [editingCalculator, setEditingCalculator] = useState(false)
   const [showMobileDetails, setShowMobileDetails] = useState(false)
@@ -104,8 +128,12 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const [assignProductForm, setAssignProductForm] = useState({
     product_id: '',
     quantity: 1,
-    frequency_days: 30
+    next_ship_date: new Date().toISOString().split('T')[0]
   })
+  const [shippingScheduleItems, setShippingScheduleItems] = useState([])
+  const [showShippingModal, setShowShippingModal] = useState(false)
+  const [shippingClient, setShippingClient] = useState(null)
+  const [nextShipDateInput, setNextShipDateInput] = useState('')
 
   // Projects & Tasks State
   const [projects, setProjects] = useState([])
@@ -120,13 +148,24 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const [viewingProjectId, setViewingProjectId] = useState(null)
   const [projectForm, setProjectForm] = useState({ name: '', description: '', deadline: '', goal: '' })
   const [taskForm, setTaskForm] = useState({ title: '', description: '', due_date: '', priority: 'medium', project_id: '' })
+  const [showCompletedTasks, setShowCompletedTasks] = useState(false)
   const ALL_TASKS_VIEW_ID = 'all-tasks-folder'
+
+  // Custom Data Tables State
+  const [customDataTables, setCustomDataTables] = useState([])
+  const [showAddTableModal, setShowAddTableModal] = useState(false)
+  const [editingTable, setEditingTable] = useState(null)
+  const [newTableForm, setNewTableForm] = useState({ name: '', description: '', columns: [] })
+  const [tableRowsData, setTableRowsData] = useState({})
+  const [selectedTableId, setSelectedTableId] = useState(null)
+  const [tableColumnsData, setTableColumnsData] = useState({})
+  const [editingRowId, setEditingRowId] = useState(null)
+  const [editingRowData, setEditingRowData] = useState({})
+  const [newRowForm, setNewRowForm] = useState({})
 
   // Helper function to format dates without timezone conversion
   const formatDate = (dateString) => {
-    if (!dateString) return ''
-    const date = new Date(dateString + 'T00:00:00')
-    return date.toLocaleDateString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric' })
+    return formatDisplayDate(dateString)
   }
 
   const getLocalTodayDateString = () => {
@@ -152,15 +191,18 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const [expenseForm, setExpenseForm] = useState({ description: '', amount: '', category: '', date: '' })
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth())
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
+  const [selectedShippingDate, setSelectedShippingDate] = useState(new Date().toISOString().split('T')[0])
 
   useEffect(() => {
     fetchLeads()
     fetchProducts()
     fetchSuppliers()
     fetchAllClientProducts()
+    fetchShippingSchedule()
     fetchProjects()
     fetchTasks()
     fetchExpenses()
+    fetchCustomDataTables()
   }, [])
 
   useEffect(() => {
@@ -311,6 +353,165 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     setTasks(prevTasks => prevTasks.map(task => task.id === taskId ? { ...task, status: newStatus } : task))
   }
 
+  const fetchCustomDataTables = async () => {
+    if (!supabase) return
+    try {
+      const { data: tables, error } = await supabase
+        .from('custom_data_tables')
+        .select('*')
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      setCustomDataTables(tables || [])
+      
+      // Fetch columns and rows for each table
+      for (const table of tables || []) {
+        const { data: columns, error: colsError } = await supabase
+          .from('custom_table_columns')
+          .select('*')
+          .eq('table_id', table.id)
+          .order('column_order', { ascending: true })
+        if (!colsError) {
+          setTableColumnsData(prev => ({ ...prev, [table.id]: columns || [] }))
+        }
+
+        const { data: rows, error: rowsError } = await supabase
+          .from('custom_table_rows')
+          .select('*')
+          .eq('table_id', table.id)
+          .order('row_order', { ascending: true })
+        if (!rowsError) {
+          setTableRowsData(prev => ({ ...prev, [table.id]: rows || [] }))
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching custom data tables:', error)
+    }
+  }
+
+  const createOrUpdateTable = async (e) => {
+    e.preventDefault()
+    if (!newTableForm.name.trim()) {
+      alert('Please enter a table name')
+      return
+    }
+    const normalizedColumns = (newTableForm.columns || [])
+      .map(col => (col || '').trim())
+      .filter(Boolean)
+
+    if (normalizedColumns.length === 0) {
+      alert('Please add at least one column')
+      return
+    }
+    try {
+      if (editingTable) {
+        // Update existing table
+        const { error } = await supabase
+          .from('custom_data_tables')
+          .update({ name: newTableForm.name, description: newTableForm.description || '' })
+          .eq('id', editingTable.id)
+        if (error) throw error
+
+        const { error: deleteColumnsError } = await supabase
+          .from('custom_table_columns')
+          .delete()
+          .eq('table_id', editingTable.id)
+        if (deleteColumnsError) throw deleteColumnsError
+
+        const columnsToAdd = normalizedColumns.map((col, idx) => ({
+          table_id: editingTable.id,
+          column_name: col,
+          column_order: idx
+        }))
+
+        const { error: insertColumnsError } = await supabase
+          .from('custom_table_columns')
+          .insert(columnsToAdd)
+        if (insertColumnsError) throw insertColumnsError
+
+        setSelectedTableId(editingTable.id)
+      } else {
+        // Create new table
+        const { data: newTable, error } = await supabase
+          .from('custom_data_tables')
+          .insert([{
+            name: newTableForm.name,
+            description: newTableForm.description || ''
+          }])
+          .select()
+        if (error) throw error
+        
+        // Add columns to new table
+        if (newTable && newTable[0]) {
+          const tableId = newTable[0].id
+          const columnsToAdd = normalizedColumns.map((col, idx) => ({
+            table_id: tableId,
+            column_name: col,
+            column_order: idx
+          }))
+          const { error: colError } = await supabase
+            .from('custom_table_columns')
+            .insert(columnsToAdd)
+          if (colError) throw colError
+
+          setSelectedTableId(tableId)
+        }
+      }
+      await fetchCustomDataTables()
+      setShowAddTableModal(false)
+      setEditingTable(null)
+      setNewTableForm({ name: '', description: '', columns: [] })
+      alert(editingTable ? 'Table updated!' : 'Table created!')
+    } catch (error) {
+      console.error('Error saving table:', error)
+      alert('Error saving table')
+    }
+  }
+
+  const saveTableRow = async (tableId, rowData) => {
+    try {
+      if (editingRowId) {
+        // Update existing row
+        const { error } = await supabase
+          .from('custom_table_rows')
+          .update({ data: rowData })
+          .eq('id', editingRowId)
+        if (error) throw error
+      } else {
+        // Insert new row
+        const { error } = await supabase
+          .from('custom_table_rows')
+          .insert([{
+            table_id: tableId,
+            data: rowData,
+            row_order: (tableRowsData[tableId]?.length || 0)
+          }])
+        if (error) throw error
+      }
+      setEditingRowId(null)
+      setEditingRowData({})
+      setNewRowForm({})
+      await fetchCustomDataTables()
+    } catch (error) {
+      console.error('Error saving row:', error)
+      alert('Error saving row')
+    }
+  }
+
+  const deleteTableRow = async (rowId, tableId) => {
+    if (!confirm('Delete this row?')) return
+    try {
+      const { error } = await supabase
+        .from('custom_table_rows')
+        .delete()
+        .eq('id', rowId)
+      if (error) throw error
+      await fetchCustomDataTables()
+    } catch (error) {
+      console.error('Error deleting row:', error)
+      alert('Error deleting row')
+    }
+  }
+
   const fetchExpenses = async () => {
     if (!supabase) return
     try {
@@ -380,6 +581,47 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       setAllClientProducts(grouped)
     } catch (error) {
       console.error('Error fetching all client products:', error)
+    }
+  }
+
+  const fetchShippingSchedule = async () => {
+    if (!supabase) return
+
+    try {
+      const { data, error } = await supabase
+        .from('client_products')
+        .select(`
+          id,
+          lead_id,
+          product_id,
+          quantity,
+          next_ship_date,
+          active,
+          products (
+            id,
+            name,
+            category
+          ),
+          leads (
+            id,
+            name
+          )
+        `)
+        .eq('active', true)
+        .not('next_ship_date', 'is', null)
+        .order('next_ship_date', { ascending: true })
+
+      if (error) throw error
+
+      const normalized = (data || []).map(item => ({
+        ...item,
+        client_name: item.leads?.name || 'Unknown Client',
+        product_name: item.products?.name || 'Unknown Product'
+      }))
+
+      setShippingScheduleItems(normalized)
+    } catch (error) {
+      console.error('Error fetching shipping schedule:', error)
     }
   }
 
@@ -743,162 +985,34 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     }
   }
 
-  const createPendingOrder = async (client) => {
-    if (!supabase || !client || !client.date_shipped || !client.shipping_duration) {
-      return // Can't create order without shipping info
-    }
-
-    try {
-      // Calculate next ship date
-      const lastShipped = new Date(client.date_shipped + 'T12:00:00')
-      let nextShipDate = new Date(lastShipped)
-
-      if (client.shipping_duration === 'end_of_month') {
-        // Next ship is end of next month
-        nextShipDate = new Date(lastShipped.getFullYear(), lastShipped.getMonth() + 2, 0)
-      } else if (client.shipping_duration === '3_month') {
-        // Add 3 months
-        nextShipDate.setMonth(nextShipDate.getMonth() + 3)
-      } else {
-        // Default to 1 month
-        nextShipDate.setMonth(nextShipDate.getMonth() + 1)
-      }
-
-      const nextShipDateStr = nextShipDate.toISOString().split('T')[0]
-
-      // Get client's assigned products
-      const { data: clientProds, error: prodError } = await supabase
-        .from('client_products')
-        .select(`
-          *,
-          products (
-            id,
-            name,
-            category
-          )
-        `)
-        .eq('lead_id', client.id)
-        .eq('active', true)
-
-      if (prodError) throw prodError
-
-      // Only create order if client has assigned products
-      if (!clientProds || clientProds.length === 0) {
-        console.log(`No products assigned to ${client.name}, skipping order creation`)
-        return
-      }
-
-      // Create the pending order
-      const { data: order, error: orderError } = await supabase
-        .from('pending_orders')
-        .insert([{
-          lead_id: client.id,
-          ship_date: nextShipDateStr,
-          status: 'pending',
-          order_details: {
-            client_name: client.name,
-            address: {
-              line1: client.address_line1,
-              city: client.city,
-              state: client.state,
-              zip: client.zip_code
-            }
-          }
-        }])
-        .select()
-        .single()
-
-      if (orderError) throw orderError
-
-      // Add order items with cheapest supplier for each product
-      const orderItems = []
-      
-      for (const cp of clientProds) {
-        // Find cheapest supplier for this product
-        const { data: cheapestSupplier, error: supplierError } = await supabase
-          .from('product_suppliers')
-          .select('id, supplier_id, price')
-          .eq('product_id', cp.product_id)
-          .eq('in_stock', true)
-          .not('price', 'is', null)
-          .order('price', { ascending: true })
-          .limit(1)
-          .single()
-
-        // Use cheapest supplier if found, otherwise no supplier
-        orderItems.push({
-          pending_order_id: order.id,
-          product_id: cp.product_id,
-          quantity: cp.quantity,
-          supplier_id: cheapestSupplier?.supplier_id || null,
-          price: cheapestSupplier?.price || null
-        })
-
-        if (cheapestSupplier) {
-          console.log(`  → ${cp.products.name}: $${cheapestSupplier.price} (cheapest)`)
-        } else {
-          console.log(`  → ${cp.products.name}: No pricing data`)
-        }
-      }
-
-      const { error: itemsError } = await supabase
-        .from('pending_order_items')
-        .insert(orderItems)
-
-      if (itemsError) throw itemsError
-
-      console.log(`Created pending order for ${client.name} on ${nextShipDateStr}`)
-    } catch (error) {
-      console.error('Error creating pending order:', error)
-      // Don't throw - order creation is a helper, not critical for shipping
-    }
-  }
-
-  const handleMarkShipped = async (duration) => {
+  const handleMarkShipped = async () => {
     if (!supabase || !shippingClient) return
+    if (!nextShipDateInput) {
+      alert('Please select the next shipping date')
+      return
+    }
 
     setUpdating(true)
     try {
-      // Calculate the new shipping date based on duration
-      const today = new Date()
-      let shippingDuration = '1_month'
-      
-      if (duration === 'end_of_month') {
-        // Calculate days until end of current month
-        const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0)
-        shippingDuration = 'end_of_month'
-      } else if (duration === '3_month') {
-        shippingDuration = '3_month'
-      } else {
-        shippingDuration = '1_month'
-      }
-
       const { error } = await supabase
-        .from('leads')
-        .update({ 
-          date_shipped: today.toISOString().split('T')[0],
-          shipping_duration: shippingDuration
+        .from('client_products')
+        .update({
+          next_ship_date: nextShipDateInput
         })
         .eq('id', shippingClient.id)
 
       if (error) throw error
 
-      // Create pending order for next shipment
-      await createPendingOrder({
-        ...shippingClient,
-        date_shipped: today.toISOString().split('T')[0],
-        shipping_duration: shippingDuration
-      })
+      if (selectedClient?.id === shippingClient.lead_id) {
+        await fetchClientProducts(selectedClient.id)
+      }
 
-      // Refresh leads list and pending orders
-      await fetchLeads()
-      await fetchPendingOrders()
-      
-      // Close modal
+      await fetchShippingSchedule()
       setShowShippingModal(false)
       setShippingClient(null)
-      
-      alert('Shipment marked successfully! Check the Shipping Queue tab to see the pending order.')
+      setNextShipDateInput('')
+
+      alert('Shipment marked. Next shipping date saved.')
     } catch (error) {
       console.error('Error marking shipment:', error)
       alert('Failed to mark shipment: ' + error.message)
@@ -1242,11 +1356,12 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         },
       })
 
+      const result = await response.json().catch(() => null)
+
       if (!response.ok) {
-        throw new Error('Failed to sync from Google Sheets')
+        throw new Error(result?.error || result?.message || 'Failed to sync from Google Sheets')
       }
 
-      const result = await response.json()
       setSyncResult(result)
       await fetchLeads()
 
@@ -1343,7 +1458,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                 setSelectedClient(null)
                 setShowMobileDetails(false)
                 if (item.id === 'shipping') {
-                  fetchPendingOrders()
+                  fetchShippingSchedule()
                 }
               }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors ${
@@ -1463,44 +1578,15 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                               return total
                             }
 
-                            const deductible = parseFloat(client.calc_deductible) || 0
-                            const oopMax = parseFloat(client.calc_oop_max) || 0
-                            const percentOfAllowable = parseFloat(client.calc_percent_allowable) || 0
-                            const allowableAmount = parseFloat(client.calc_insurance_paid) || 0
-                            const costOfProduct = parseFloat(client.calc_product_cost) || 0
+                            const { netYearlyProfit } = calculateInsuranceProjection({
+                              deductible: parseFloat(client.calc_deductible) || 0,
+                              oopMax: parseFloat(client.calc_oop_max) || 0,
+                              percentOfAllowable: parseFloat(client.calc_percent_allowable) || 0,
+                              allowableAmount: parseFloat(client.calc_insurance_paid) || 0,
+                              costOfProduct: parseFloat(client.calc_product_cost) || 0
+                            })
 
-                            let remainingDeductible = deductible
-                            let patientOOPTotal = 0
-                            let yearlyRevenue = 0
-
-                            for (let month = 1; month <= 12; month++) {
-                              let insurancePayment
-                              let patientPayment
-
-                              if (oopMax > 0 && patientOOPTotal >= oopMax) {
-                                insurancePayment = allowableAmount
-                                patientPayment = 0
-                              } else {
-                                insurancePayment = allowableAmount * (percentOfAllowable / 100)
-                                patientPayment = allowableAmount - insurancePayment
-                              }
-
-                              patientOOPTotal += patientPayment
-
-                              if (remainingDeductible > 0) {
-                                if (insurancePayment >= remainingDeductible) {
-                                  yearlyRevenue += insurancePayment - remainingDeductible
-                                  remainingDeductible = 0
-                                } else {
-                                  remainingDeductible -= insurancePayment
-                                }
-                              } else {
-                                yearlyRevenue += insurancePayment
-                              }
-                            }
-
-                            const yearlyNetProfit = yearlyRevenue - (costOfProduct * 12)
-                            return total + yearlyNetProfit
+                            return total + netYearlyProfit
                           }, 0)
 
                           return (totalYearlyNetProfit / 12).toFixed(2)
@@ -2084,7 +2170,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                               <div className="flex-1">
                                 <div className="font-medium text-gray-900">{cp.products?.name}</div>
                                 <div className="text-xs text-gray-600">
-                                  Quantity: {cp.quantity} • Every {cp.frequency_days} days
+                                  Quantity: {cp.quantity} • Next Ship: {cp.next_ship_date ? formatDate(cp.next_ship_date) : 'Not set'}
                                 </div>
                               </div>
                               <button
@@ -2123,36 +2209,6 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                         onChange={(e) => updateClientDetails(selectedClient.id, 'date_shipped', e.target.value)}
                         className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Shipping Duration
-                      </label>
-                      <div className="flex gap-4">
-                        <label className="flex items-center cursor-pointer">
-                          <input
-                            type="radio"
-                            name={`shipping_duration_${selectedClient.id}`}
-                            value="1_month"
-                            checked={selectedClient.shipping_duration === '1_month'}
-                            onChange={(e) => updateClientDetails(selectedClient.id, 'shipping_duration', e.target.value)}
-                            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 cursor-pointer"
-                          />
-                          <span className="ml-2 text-sm text-gray-700">1 Month</span>
-                        </label>
-                        <label className="flex items-center cursor-pointer">
-                          <input
-                            type="radio"
-                            name={`shipping_duration_${selectedClient.id}`}
-                            value="3_month"
-                            checked={selectedClient.shipping_duration === '3_month'}
-                            onChange={(e) => updateClientDetails(selectedClient.id, 'shipping_duration', e.target.value)}
-                            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 cursor-pointer"
-                          />
-                          <span className="ml-2 text-sm text-gray-700">3 Months</span>
-                        </label>
-                      </div>
                     </div>
 
                     {/* Payment Calculator Section */}
@@ -2200,84 +2256,13 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                         <div className="space-y-4">
                           {/* Net Profit Display */}
                           {(() => {
-                            const deductible = parseFloat(selectedClient.calc_deductible) || 0
-                            const oopMax = parseFloat(selectedClient.calc_oop_max) || 0
-                            const percentOfAllowable = parseFloat(selectedClient.calc_percent_allowable) || 0
-                            const insurancePaidAmount = parseFloat(selectedClient.calc_insurance_paid) || 0
-                            const costOfProduct = parseFloat(selectedClient.calc_product_cost) || 0
-
-                            // Calculate full allowable amount (what 100% would be)
-                            const fullAllowableAmount = percentOfAllowable > 0 
-                              ? insurancePaidAmount / (percentOfAllowable / 100)
-                              : insurancePaidAmount
-
-                            // Calculate patient portion per month (at current %)
-                            const patientPortionPerMonth = fullAllowableAmount - insurancePaidAmount
-
-                            // Year-long simulation
-                            let remainingDeductible = deductible
-                            let patientOOPTotal = 0 // Tracks all patient out-of-pocket spending
-                            let totalRevenue = 0
-
-                            for (let month = 1; month <= 12; month++) {
-                              // Check if OOP Max has been hit BEFORE this month
-                              let insurancePayment, patientPayment
-                              
-                              if (oopMax > 0 && patientOOPTotal >= oopMax) {
-                                // OOP Max already hit - insurance pays 100%
-                                insurancePayment = fullAllowableAmount
-                                patientPayment = 0
-                              } else {
-                                // OOP Max not yet hit - normal cost sharing
-                                insurancePayment = insurancePaidAmount
-                                patientPayment = patientPortionPerMonth
-                                
-                                // Check if patient will hit OOP max THIS month
-                                if (oopMax > 0 && (patientOOPTotal + patientPayment) > oopMax) {
-                                  // Patient reaches OOP max partway through this month
-                                  const remainingBeforeMax = oopMax - patientOOPTotal
-                                  const percentOfMonthBeforeMax = remainingBeforeMax / patientPayment
-                                  
-                                  // Split the month: part at normal rate, part at 100% insurance
-                                  const insuranceBeforeMax = insurancePaidAmount * percentOfMonthBeforeMax
-                                  const insuranceAfterMax = fullAllowableAmount * (1 - percentOfMonthBeforeMax)
-                                  
-                                  insurancePayment = insuranceBeforeMax + insuranceAfterMax
-                                  patientPayment = remainingBeforeMax
-                                }
-                              }
-
-                              // Track patient OOP (includes both deductible and cost-share payments)
-                              patientOOPTotal += patientPayment
-
-                              // Apply insurance payment toward deductible first, then as revenue
-                              let monthRevenue = 0
-                              if (remainingDeductible > 0) {
-                                if (insurancePayment >= remainingDeductible) {
-                                  // Deductible fully met this month
-                                  monthRevenue = insurancePayment - remainingDeductible
-                                  // Patient also pays toward deductible
-                                  const patientDeductiblePayment = Math.min(patientPayment, remainingDeductible - insurancePayment)
-                                  if (patientDeductiblePayment > 0) {
-                                    patientOOPTotal += patientDeductiblePayment
-                                  }
-                                  remainingDeductible = 0
-                                } else {
-                                  // Deductible partially met - patient helps pay deductible
-                                  const deductiblePaidThisMonth = insurancePayment + Math.min(patientPayment, remainingDeductible - insurancePayment)
-                                  remainingDeductible -= deductiblePaidThisMonth
-                                  // Deductible payments count toward OOP (already tracked above)
-                                  monthRevenue = 0
-                                }
-                              } else {
-                                // Deductible already met - count only insurance payment as revenue
-                                monthRevenue = insurancePayment
-                              }
-
-                              totalRevenue += monthRevenue
-                            }
-
-                            const netYearlyProfit = totalRevenue - (costOfProduct * 12)
+                            const { netYearlyProfit } = calculateInsuranceProjection({
+                              deductible: parseFloat(selectedClient.calc_deductible) || 0,
+                              oopMax: parseFloat(selectedClient.calc_oop_max) || 0,
+                              percentOfAllowable: parseFloat(selectedClient.calc_percent_allowable) || 0,
+                              allowableAmount: parseFloat(selectedClient.calc_insurance_paid) || 0,
+                              costOfProduct: parseFloat(selectedClient.calc_product_cost) || 0
+                            })
 
                             return (
                               <div className="bg-gradient-to-r from-blue-50 to-green-50 p-6 rounded-lg border-2 border-blue-200">
@@ -2629,11 +2614,9 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         {/* Calendar View */}
         {activeView === 'calendar' && (
           <div className="bg-white rounded-lg shadow p-4 sm:p-6">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 sm:mb-6 gap-3">
-              <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Shipping Calendar</h2>
-              
-              {/* Month Navigation */}
-              <div className="flex items-center gap-2 sm:gap-4 w-full sm:w-auto justify-between sm:justify-end">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold text-gray-900">📅 Shipping Calendar</h2>
+              <div className="flex items-center gap-2">
                 <button
                   onClick={() => {
                     if (selectedMonth === 0) {
@@ -2643,20 +2626,13 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                       setSelectedMonth(selectedMonth - 1)
                     }
                   }}
-                  className="p-1.5 sm:p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                  title="Previous month"
+                  className="p-2 hover:bg-gray-100 rounded-lg"
                 >
-                  <svg className="w-5 h-5 sm:w-6 sm:h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path>
-                  </svg>
+                  ← Prev
                 </button>
-                
-                <div className="text-center flex-1 sm:min-w-[200px]">
-                  <div className="text-base sm:text-xl font-bold text-gray-900">
-                    {new Date(selectedYear, selectedMonth).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-                  </div>
+                <div className="min-w-[150px] text-center font-bold text-gray-900">
+                  {new Date(selectedYear, selectedMonth).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
                 </div>
-                
                 <button
                   onClick={() => {
                     if (selectedMonth === 11) {
@@ -2666,216 +2642,143 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                       setSelectedMonth(selectedMonth + 1)
                     }
                   }}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                  title="Next month"
+                  className="p-2 hover:bg-gray-100 rounded-lg"
                 >
-                  <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path>
-                  </svg>
+                  Next →
                 </button>
-                
                 <button
                   onClick={() => {
                     setSelectedMonth(new Date().getMonth())
                     setSelectedYear(new Date().getFullYear())
                   }}
-                  className="ml-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm font-semibold"
+                  className="ml-4 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium"
                 >
                   Today
                 </button>
               </div>
             </div>
-            
-            {(() => {
-              // Calculate upcoming shipping dates for clients with date_shipped
-              const upcomingShipments = qualifiedLeads
-                .filter(client => client.date_shipped)
-                .map(client => {
-                  const shippedDate = new Date(client.date_shipped)
-                  const today = new Date()
-                  today.setHours(0, 0, 0, 0)
-                  const shippedDateOnly = new Date(shippedDate)
-                  shippedDateOnly.setHours(0, 0, 0, 0)
-                  
-                  let nextShipDate
-                  
-                  // If the shipped date is in the future or today, use it as the next ship date
-                  if (shippedDateOnly >= today) {
-                    nextShipDate = shippedDateOnly
-                  } else {
-                    // If shipped date is in the past, calculate next shipment based on duration
-                    if (client.shipping_duration) {
-                      const monthsToAdd = client.shipping_duration === '3_month' ? 3 : 1
-                      nextShipDate = new Date(shippedDateOnly)
-                      nextShipDate.setMonth(nextShipDate.getMonth() + monthsToAdd)
-                    } else {
-                      // No duration set, don't show past dates without duration
-                      return null
+
+            <div className="flex gap-6">
+              {/* Ship Today Panel - Left */}
+              <div className="w-64 border-r pr-6">
+                <h3 className="text-lg font-bold text-gray-900 mb-4">📦 Ship Today</h3>
+                <div className="space-y-2 max-h-96 overflow-y-auto">
+                  {(() => {
+                    const today = new Date()
+                    today.setHours(0, 0, 0, 0)
+                    const todayShipments = shippingScheduleItems.filter(item => {
+                      const itemDate = new Date(item.next_ship_date + 'T00:00:00')
+                      return itemDate.getTime() === today.getTime()
+                    })
+                    
+                    if (todayShipments.length === 0) {
+                      return <p className="text-sm text-gray-500">No shipments due today</p>
                     }
+                    
+                    return todayShipments.map(item => (
+                      <div key={item.id} className="bg-green-50 border border-green-300 rounded-lg p-3">
+                        <div className="font-medium text-gray-900 text-sm">{item.client_name}</div>
+                        <div className="text-xs text-gray-600 mt-1">{item.product_name}</div>
+                        <div className="text-xs text-gray-600">Qty: {item.quantity}</div>
+                        <button
+                          onClick={() => {
+                            setShippingClient(item)
+                            setNextShipDateInput('')
+                            setShowShippingModal(true)
+                          }}
+                          className="mt-2 w-full px-2 py-1 bg-green-600 hover:bg-green-700 text-white rounded text-xs font-medium"
+                        >
+                          ✓ Mark Shipped
+                        </button>
+                      </div>
+                    ))
+                  })()}
+                </div>
+              </div>
+
+              {/* Month Calendar Grid - Right */}
+              <div className="flex-1">
+                {(() => {
+                  const firstDay = new Date(selectedYear, selectedMonth, 1)
+                  const lastDay = new Date(selectedYear, selectedMonth + 1, 0)
+                  const daysInMonth = lastDay.getDate()
+                  const startingDayOfWeek = firstDay.getDay()
+                  
+                  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+                  const calendarDays = []
+                  
+                  // Add empty cells for days before month starts
+                  for (let i = 0; i < startingDayOfWeek; i++) {
+                    calendarDays.push(null)
                   }
                   
-                  return {
-                    ...client,
-                    nextShipDate,
-                    daysUntilShip: Math.ceil((nextShipDate - today) / (1000 * 60 * 60 * 24)),
-                    isFirstShipment: shippedDateOnly >= today
+                  // Add days of month
+                  for (let day = 1; day <= daysInMonth; day++) {
+                    calendarDays.push(day)
                   }
-                })
-                .filter(shipment => shipment !== null) // Remove null entries
-                .sort((a, b) => a.nextShipDate - b.nextShipDate)
-
-              // Filter shipments for the selected month
-              const shipmentsInSelectedMonth = upcomingShipments.filter(shipment => {
-                const shipDate = shipment.nextShipDate
-                return shipDate.getMonth() === selectedMonth && shipDate.getFullYear() === selectedYear
-              })
-
-              // Calculate summary stats relative to the selected month
-              const today = new Date()
-              today.setHours(0, 0, 0, 0)
-              
-              // Create a date for the first day of the selected month
-              const selectedMonthStart = new Date(selectedYear, selectedMonth, 1)
-              selectedMonthStart.setHours(0, 0, 0, 0)
-              
-              // Create a date for the last day of the selected month
-              const selectedMonthEnd = new Date(selectedYear, selectedMonth + 1, 0)
-              selectedMonthEnd.setHours(23, 59, 59, 999)
-              
-              // Overdue: shipments before today (only if viewing current or past months)
-              const overdue = upcomingShipments.filter(s => {
-                return s.nextShipDate < today
-              }).length
-              
-              // Due this week: shipments in the 7 days from today
-              const oneWeekFromNow = new Date(today)
-              oneWeekFromNow.setDate(oneWeekFromNow.getDate() + 7)
-              const dueThisWeek = upcomingShipments.filter(s => {
-                return s.nextShipDate >= today && s.nextShipDate <= oneWeekFromNow
-              }).length
-              
-              // Due this month: shipments in the selected month
-              const dueThisMonth = shipmentsInSelectedMonth.length
-
-              return (
-                <div className="space-y-8">
-                  {/* Summary Cards */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                    <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                      <div className="text-red-900 font-semibold text-sm mb-1">Overdue</div>
-                      <div className="text-3xl font-bold text-red-600">{overdue}</div>
-                    </div>
-                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                      <div className="text-yellow-900 font-semibold text-sm mb-1">Due This Week</div>
-                      <div className="text-3xl font-bold text-yellow-600">{dueThisWeek}</div>
-                    </div>
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                      <div className="text-blue-900 font-semibold text-sm mb-1">
-                        Due in {new Date(selectedYear, selectedMonth).toLocaleDateString('en-US', { month: 'long' })}
-                      </div>
-                      <div className="text-3xl font-bold text-blue-600">{dueThisMonth}</div>
-                    </div>
-                  </div>
-
-                  {/* Calendar Grid for Selected Month */}
-                  {shipmentsInSelectedMonth.length === 0 ? (
-                    <div className="text-center py-12 text-gray-500 border-2 border-dashed border-gray-300 rounded-lg">
-                      <p className="text-lg">No shipments scheduled for this month.</p>
-                      <p className="text-sm mt-2">Use the navigation to view other months.</p>
-                    </div>
-                  ) : (
+                  
+                  return (
                     <div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {shipmentsInSelectedMonth.map(shipment => {
-                            const isOverdue = shipment.daysUntilShip < 0
-                            const isDueSoon = shipment.daysUntilShip >= 0 && shipment.daysUntilShip <= 7
-                            
-                            return (
-                              <div 
-                                key={shipment.id}
-                                className={`border-2 rounded-lg p-4 hover:shadow-md transition-shadow ${
-                                  isOverdue ? 'border-red-300 bg-red-50' :
-                                  isDueSoon ? 'border-yellow-300 bg-yellow-50' :
-                                  shipment.isFirstShipment ? 'border-green-300 bg-green-50' :
-                                  'border-gray-200 bg-white'
-                                }`}
-                              >
-                                <div className="flex justify-between items-start mb-2">
-                                  <div className="font-semibold text-gray-900 text-lg">{shipment.name}</div>
-                                  {isOverdue && (
-                                    <span className="text-xs bg-red-600 text-white px-2 py-1 rounded-full font-semibold">
-                                      OVERDUE
-                                    </span>
-                                  )}
-                                  {isDueSoon && !isOverdue && (
-                                    <span className="text-xs bg-yellow-600 text-white px-2 py-1 rounded-full font-semibold">
-                                      SOON
-                                    </span>
-                                  )}
-                                  {shipment.isFirstShipment && !isDueSoon && !isOverdue && (
-                                    <span className="text-xs bg-green-600 text-white px-2 py-1 rounded-full font-semibold">
-                                      NEW
-                                    </span>
-                                  )}
-                                </div>
-                                
-                                <div className="space-y-1 text-sm">
-                                  <div className="text-gray-600">
-                                    <span className="font-medium">
-                                      {shipment.isFirstShipment ? 'First Shipment:' : 'Due:'}
-                                    </span>{' '}
-                                    {shipment.nextShipDate.toLocaleDateString('en-US', { 
-                                      month: 'numeric', 
-                                      day: 'numeric', 
-                                      year: 'numeric' 
-                                    })}
-                                  </div>
-                                  {!shipment.isFirstShipment && (
-                                    <div className="text-gray-600">
-                                      <span className="font-medium">Last Shipped:</span>{' '}
-                                      {formatDate(shipment.date_shipped)}
-                                    </div>
-                                  )}
-                                  {shipment.shipping_duration && (
-                                    <div className="text-gray-600">
-                                      <span className="font-medium">Duration:</span>{' '}
-                                      {shipment.shipping_duration === 'end_of_month' ? 'Until End of Month' :
-                                       shipment.shipping_duration === '3_month' ? '3 Months' : '1 Month'}
-                                    </div>
-                                  )}
-                                  {shipment.product_needed && (
-                                    <div className="text-gray-600 mt-2 pt-2 border-t border-gray-200">
-                                      <span className="font-medium">Product:</span>{' '}
-                                      {shipment.product_needed}
-                                    </div>
-                                  )}
-                                  <div className="mt-3 pt-2 border-t border-gray-200 flex items-center justify-between">
-                                    <span className="text-xs text-gray-500">
-                                      {shipment.isFirstShipment 
-                                        ? `${shipment.daysUntilShip} days until first shipment`
-                                        : `${Math.abs(shipment.daysUntilShip)} days ${isOverdue ? 'overdue' : 'until due'}`
-                                      }
-                                    </span>
-                                    <button
-                                      onClick={() => {
-                                        setShippingClient(shipment)
-                                        setShowShippingModal(true)
-                                      }}
-                                      className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded font-semibold transition-colors"
-                                    >
-                                      ✓ Shipped
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
+                      {/* Day headers */}
+                      <div className="grid grid-cols-7 gap-0 mb-2 bg-gray-100 rounded-lg overflow-hidden">
+                        {days.map(day => (
+                          <div key={day} className="p-2 text-center font-bold text-gray-700 text-sm">
+                            {day}
+                          </div>
+                        ))}
                       </div>
-                  )}
-                </div>
-              )
-            })()}
+                      
+                      {/* Calendar grid */}
+                      <div className="grid grid-cols-7 gap-1 border border-gray-200 rounded-lg p-2 bg-gray-50">
+                        {calendarDays.map((day, idx) => {
+                          if (day === null) {
+                            return <div key={`empty-${idx}`} className="h-24 bg-white"></div>
+                          }
+                          
+                          const cellDate = new Date(selectedYear, selectedMonth, day)
+                          cellDate.setHours(0, 0, 0, 0)
+                          const cellShipments = shippingScheduleItems.filter(item => {
+                            const itemDate = new Date(item.next_ship_date + 'T00:00:00')
+                            return itemDate.getTime() === cellDate.getTime()
+                          })
+                          
+                          const today = new Date()
+                          today.setHours(0, 0, 0, 0)
+                          const isToday = cellDate.getTime() === today.getTime()
+                          const isPast = cellDate < today
+                          
+                          return (
+                            <div
+                              key={day}
+                              className={`h-24 p-2 rounded border-2 overflow-hidden ${
+                                isToday ? 'bg-blue-100 border-blue-500' :
+                                isPast && cellShipments.length > 0 ? 'bg-red-50 border-red-300' :
+                                cellShipments.length > 0 ? 'bg-yellow-50 border-yellow-300' :
+                                'bg-white border-gray-300'
+                              }`}
+                            >
+                              <div className="text-sm font-bold text-gray-900">{day}</div>
+                              <div className="text-xs space-y-1 mt-1 overflow-y-auto">
+                                {cellShipments.slice(0, 2).map(item => (
+                                  <div key={item.id} className="bg-blue-100 text-blue-900 px-1 py-0.5 rounded text-xs truncate">
+                                    {item.client_name}
+                                  </div>
+                                ))}
+                                {cellShipments.length > 2 && (
+                                  <div className="text-gray-600 text-xs px-1">
+                                    +{cellShipments.length - 2} more
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })()}
+              </div>
+            </div>
           </div>
         )}
 
@@ -3017,84 +2920,21 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   const deductible = parseFloat(calcInputs.deductible) || 0
                   const oopMax = parseFloat(calcInputs.oopMax) || 0
                   const percentOfAllowable = parseFloat(calcInputs.percentOfAllowable) || 0
-                  const insurancePaidAmount = parseFloat(calcInputs.insurancePaidAmount) || 0
+                  const allowableAmount = parseFloat(calcInputs.insurancePaidAmount) || 0
                   const costOfProduct = parseFloat(calcInputs.costOfProduct) || 0
 
-                  // Calculate full allowable amount (what 100% would be)
-                  const fullAllowableAmount = percentOfAllowable > 0 
-                    ? insurancePaidAmount / (percentOfAllowable / 100)
-                    : insurancePaidAmount
-
-                  // Calculate patient portion per month (at current %)
-                  const patientPortionPerMonth = fullAllowableAmount - insurancePaidAmount
-
-                  // Year-long simulation
-                  let remainingDeductible = deductible
-                  let patientOOPTotal = 0 // Tracks all patient out-of-pocket spending
-                  let totalRevenue = 0
-                  const monthlyBreakdown = []
-
-                  for (let month = 1; month <= 12; month++) {
-                    // Check if OOP Max has been hit BEFORE this month
-                    let insurancePayment, patientPayment
-                    
-                    if (oopMax > 0 && patientOOPTotal >= oopMax) {
-                      // OOP Max already hit - insurance pays 100%
-                      insurancePayment = fullAllowableAmount
-                      patientPayment = 0
-                    } else {
-                      // OOP Max not yet hit - normal cost sharing
-                      insurancePayment = insurancePaidAmount
-                      patientPayment = patientPortionPerMonth
-                      
-                      // Check if patient will hit OOP max THIS month
-                      if (oopMax > 0 && (patientOOPTotal + patientPayment) > oopMax) {
-                        // Patient reaches OOP max partway through this month
-                        const remainingBeforeMax = oopMax - patientOOPTotal
-                        const percentOfMonthBeforeMax = remainingBeforeMax / patientPayment
-                        
-                        // Split the month: part at normal rate, part at 100% insurance
-                        const insuranceBeforeMax = insurancePaidAmount * percentOfMonthBeforeMax
-                        const insuranceAfterMax = fullAllowableAmount * (1 - percentOfMonthBeforeMax)
-                        
-                        insurancePayment = insuranceBeforeMax + insuranceAfterMax
-                        patientPayment = remainingBeforeMax
-                      }
-                    }
-
-                    // Track patient OOP (includes both deductible and cost-share payments)
-                    patientOOPTotal += patientPayment
-
-                    // Apply insurance payment toward deductible first, then as revenue
-                    let monthRevenue = 0
-                    if (remainingDeductible > 0) {
-                      if (insurancePayment >= remainingDeductible) {
-                        // Deductible fully met this month
-                        monthRevenue = insurancePayment - remainingDeductible
-                        remainingDeductible = 0
-                      } else {
-                        // Deductible partially met
-                        remainingDeductible -= insurancePayment
-                        monthRevenue = 0
-                      }
-                    } else {
-                      // Deductible already met - count only insurance payment as revenue
-                      monthRevenue = insurancePayment
-                    }
-
-                    totalRevenue += monthRevenue
-                    monthlyBreakdown.push({
-                      month,
-                      insurancePayment,
-                      patientPayment,
-                      monthRevenue,
-                      remainingDeductible: Math.max(0, remainingDeductible),
-                      oopReached: patientOOPTotal >= oopMax && oopMax > 0
-                    })
-                  }
-
-                  const grossYearlyProfit = totalRevenue
-                  const netYearlyProfit = totalRevenue - (costOfProduct * 12)
+                  const {
+                    grossYearlyProfit,
+                    netYearlyProfit,
+                    totalCost,
+                    monthlyBreakdown
+                  } = calculateInsuranceProjection({
+                    deductible,
+                    oopMax,
+                    percentOfAllowable,
+                    allowableAmount,
+                    costOfProduct
+                  })
 
                   return (
                     <>
@@ -3112,12 +2952,12 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                           ${netYearlyProfit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </div>
                         <div className="text-xs text-blue-600 mt-2">
-                          After ${(costOfProduct * 12).toLocaleString('en-US', { minimumFractionDigits: 2 })} product costs
+                          After ${totalCost.toLocaleString('en-US', { minimumFractionDigits: 2 })} product costs
                         </div>
                       </div>
 
                       {/* Monthly Breakdown */}
-                      {insurancePaidAmount > 0 && (
+                      {allowableAmount > 0 && (
                         <div className="mt-6">
                           <h4 className="text-sm font-semibold text-gray-800 mb-3">Monthly Breakdown</h4>
                           <div className="max-h-96 overflow-y-auto border border-gray-200 rounded-lg">
@@ -3147,7 +2987,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                         </div>
                       )}
 
-                      {insurancePaidAmount === 0 && (
+                      {allowableAmount === 0 && (
                         <div className="text-center text-gray-500 py-12 border-2 border-dashed border-gray-300 rounded-lg">
                           <p>Enter values to see profit projections</p>
                         </div>
@@ -3172,53 +3012,16 @@ export default function AdminDashboard({ userEmail, onLogout }) {
           )
 
           const calculateClientProfit = (client) => {
-            const deductible = parseFloat(client.calc_deductible) || 0
-            const oopMax = parseFloat(client.calc_oop_max) || 0
-            const percentOfAllowable = parseFloat(client.calc_percent_allowable) || 0
-            const allowableAmount = parseFloat(client.calc_insurance_paid) || 0 // Now represents Allowable Amount per Month
-            const costOfProduct = parseFloat(client.calc_product_cost) || 0
+            const { grossYearlyProfit, netYearlyProfit, totalCost } = calculateInsuranceProjection({
+              deductible: parseFloat(client.calc_deductible) || 0,
+              oopMax: parseFloat(client.calc_oop_max) || 0,
+              percentOfAllowable: parseFloat(client.calc_percent_allowable) || 0,
+              allowableAmount: parseFloat(client.calc_insurance_paid) || 0,
+              costOfProduct: parseFloat(client.calc_product_cost) || 0
+            })
 
-            let remainingDeductible = deductible
-            let patientOOPTotal = 0
-            let totalRevenue = 0
-
-            for (let month = 1; month <= 12; month++) {
-              // Calculate insurance payment based on whether OOP max is reached
-              let insurancePayment
-              let patientPayment
-              
-              if (oopMax > 0 && patientOOPTotal >= oopMax) {
-                // After OOP max: Insurance pays 100% of allowable
-                insurancePayment = allowableAmount
-                patientPayment = 0
-              } else {
-                // Before OOP max: Insurance pays their percentage of allowable
-                insurancePayment = allowableAmount * (percentOfAllowable / 100)
-                patientPayment = allowableAmount - insurancePayment
-              }
-
-              patientOOPTotal += patientPayment
-
-              // Calculate revenue after deductible
-              let monthRevenue = 0
-              if (remainingDeductible > 0) {
-                if (insurancePayment >= remainingDeductible) {
-                  monthRevenue = insurancePayment - remainingDeductible
-                  remainingDeductible = 0
-                } else {
-                  remainingDeductible -= insurancePayment
-                  monthRevenue = 0
-                }
-              } else {
-                monthRevenue = insurancePayment
-              }
-
-              totalRevenue += monthRevenue
-            }
-
-            const grossProfit = totalRevenue
-            const netProfit = totalRevenue - (costOfProduct * 12)
-            const totalCost = costOfProduct * 12
+            const grossProfit = grossYearlyProfit
+            const netProfit = netYearlyProfit
 
             return { grossProfit, netProfit, totalCost }
           }
@@ -3361,6 +3164,242 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                 ) : (
                   <div className="text-center py-8 text-gray-500">
                     <p>No expenses recorded yet. Click "Add Expense" to get started.</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Custom Data Tables Section */}
+              <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+                <div className="flex justify-between items-center mb-6">
+                  <h2 className="text-2xl font-bold text-gray-900">📋 Custom Data Tables</h2>
+                  <button
+                    onClick={() => {
+                      setEditingTable(null)
+                      setNewTableForm({ name: '', description: '', columns: [] })
+                      setShowAddTableModal(true)
+                    }}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium"
+                  >
+                    + New Table
+                  </button>
+                </div>
+
+                {customDataTables.length === 0 ? (
+                  <div className="text-center py-12 text-gray-500">
+                    <p className="mb-4">No custom tables yet. Create one to manage your own data.</p>
+                    <button
+                      onClick={() => {
+                        setEditingTable(null)
+                        setNewTableForm({ name: '', description: '', columns: [] })
+                        setShowAddTableModal(true)
+                      }}
+                      className="text-blue-600 hover:text-blue-700 font-medium"
+                    >
+                      Create your first table
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* Table Tabs */}
+                    <div className="flex flex-wrap gap-2 border-b border-gray-200 pb-4">
+                      {customDataTables.map((table) => (
+                        <button
+                          key={table.id}
+                          onClick={() => setSelectedTableId(table.id)}
+                          className={`px-4 py-2 rounded-t-lg font-medium transition-colors ${
+                            selectedTableId === table.id
+                              ? 'bg-blue-100 text-blue-700 border-b-2 border-blue-600'
+                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          }`}
+                        >
+                          {table.name}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Selected Table Data Editor */}
+                    {selectedTableId && (() => {
+                      const table = customDataTables.find(t => t.id === selectedTableId)
+                      const columns = tableColumnsData[selectedTableId] || []
+                      const rows = tableRowsData[selectedTableId] || []
+
+                      return (
+                        <div className="border border-gray-200 rounded-lg p-4 space-y-4">
+                          <div className="flex justify-between items-center">
+                            <h3 className="text-lg font-semibold text-gray-900">{table?.name}</h3>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => {
+                                  setEditingRowId(null)
+                                  setEditingRowData({})
+                                  setNewRowForm({})
+                                }}
+                                className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded text-sm font-medium"
+                              >
+                                + Add Row
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setEditingTable(table)
+                                  setNewTableForm({
+                                    name: table.name,
+                                    description: table.description || '',
+                                    columns: columns.map(c => c.column_name)
+                                  })
+                                  setShowAddTableModal(true)
+                                }}
+                                className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-medium"
+                              >
+                                Edit Table
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  if (confirm(`Delete table "${table.name}" and all its data? This cannot be undone.`)) {
+                                    const { error } = await supabase
+                                      .from('custom_data_tables')
+                                      .delete()
+                                      .eq('id', table.id)
+                                    if (!error) {
+                                      setSelectedTableId(null)
+                                      await fetchCustomDataTables()
+                                    }
+                                  }
+                                }}
+                                className="px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded text-sm font-medium"
+                              >
+                                Delete Table
+                              </button>
+                            </div>
+                          </div>
+
+                          {columns.length === 0 ? (
+                            <p className="text-gray-500 text-center py-4">No columns defined. Edit the table to add columns.</p>
+                          ) : (
+                            <>
+                              {/* Data Table */}
+                              <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                                <table className="w-full text-sm">
+                                  <thead className="bg-gray-50 border-b border-gray-200">
+                                    <tr>
+                                      {columns.map((col) => (
+                                        <th key={col.id} className="px-4 py-3 text-left font-semibold text-gray-700">
+                                          {col.column_name}
+                                        </th>
+                                      ))}
+                                      <th className="px-4 py-3 text-center font-semibold text-gray-700">Actions</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-gray-200">
+                                    {rows.map((row) => (
+                                      <tr key={row.id} className={editingRowId === row.id ? 'bg-blue-50' : 'hover:bg-gray-50'}>
+                                        {columns.map((col) => (
+                                          <td key={col.id} className="px-4 py-3 text-gray-700">
+                                            <input
+                                              type="text"
+                                              value={editingRowId === row.id
+                                                ? (editingRowData[col.column_name] || '')
+                                                : (row.data[col.column_name] || '')
+                                              }
+                                              onFocus={() => {
+                                                if (editingRowId !== row.id) {
+                                                  setEditingRowId(row.id)
+                                                  setEditingRowData({ ...(row.data || {}) })
+                                                }
+                                              }}
+                                              onChange={(e) => {
+                                                setEditingRowId(row.id)
+                                                setEditingRowData((prev) => ({
+                                                  ...(editingRowId === row.id ? prev : (row.data || {})),
+                                                  [col.column_name]: e.target.value
+                                                }))
+                                              }}
+                                              className="w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                              placeholder={col.column_name}
+                                            />
+                                          </td>
+                                        ))}
+                                        <td className="px-4 py-3 text-center">
+                                          <div className="flex gap-2 justify-center">
+                                            {editingRowId === row.id && (
+                                              <>
+                                                <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded text-xs font-medium">
+                                                  Unsaved
+                                                </span>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => saveTableRow(selectedTableId, editingRowData)}
+                                                  className="px-2 py-1 bg-green-600 hover:bg-green-700 text-white rounded text-xs"
+                                                >
+                                                  Save
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => {
+                                                    setEditingRowId(null)
+                                                    setEditingRowData({})
+                                                  }}
+                                                  className="px-2 py-1 bg-gray-500 hover:bg-gray-600 text-white rounded text-xs"
+                                                >
+                                                  Cancel
+                                                </button>
+                                              </>
+                                            )}
+                                            <button
+                                              type="button"
+                                              onClick={() => deleteTableRow(row.id, selectedTableId)}
+                                              className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-xs"
+                                            >
+                                              Delete
+                                            </button>
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+
+                              {/* New Row Form */}
+                              {editingRowId === null && Object.keys(editingRowData).length === 0 && (
+                                <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                    {columns.map((col) => (
+                                      <div key={col.id}>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">{col.column_name}</label>
+                                        <input
+                                          type="text"
+                                          value={newRowForm[col.column_name] || ''}
+                                          onChange={(e) => setNewRowForm({
+                                            ...newRowForm,
+                                            [col.column_name]: e.target.value
+                                          })}
+                                          placeholder={`Enter ${col.column_name}`}
+                                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        />
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <div className="flex gap-2 mt-4">
+                                    <button
+                                      onClick={() => saveTableRow(selectedTableId, newRowForm)}
+                                      className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md font-medium"
+                                    >
+                                      Add Row
+                                    </button>
+                                    <button
+                                      onClick={() => setNewRowForm({})}
+                                      className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-100"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )
+                    })()}
                   </div>
                 )}
               </div>
@@ -3851,7 +3890,16 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
                     <div className="border-t pt-6">
                       <div className="flex justify-between items-center mb-4">
-                        <h3 className="text-xl font-bold text-gray-900">Tasks</h3>
+                        <div className="flex items-center gap-3">
+                          <h3 className="text-xl font-bold text-gray-900">Tasks</h3>
+                          <button
+                            onClick={() => setShowCompletedTasks(!showCompletedTasks)}
+                            className="text-sm text-gray-600 hover:text-gray-900 px-3 py-1 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+                            title={showCompletedTasks ? 'Hide completed tasks' : 'View completed tasks'}
+                          >
+                            {showCompletedTasks ? '✓ Hide Completed' : '👁 View Completed'}
+                          </button>
+                        </div>
                         <button
                           onClick={() => {
                             setSelectedProject(project)
@@ -3866,7 +3914,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
                       {projTasks.length > 0 ? (
                         <div className="space-y-3">
-                          {projTasks.map((task) => (
+                          {projTasks.filter(task => showCompletedTasks || task.status !== 'completed').map((task) => (
                             <div key={task.id} className={`border-l-4 p-4 rounded ${
                               task.status === 'completed' ? 'border-green-500 bg-green-50' :
                               task.status === 'in-progress' ? 'border-blue-500 bg-blue-50' :
@@ -4024,202 +4072,198 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         {/* Shipping View */}
         {activeView === 'shipping' && (
           <div className="space-y-4">
-            {/* Stats Header */}
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                <div className="text-sm text-yellow-700 font-medium">Pending</div>
-                <div className="text-2xl font-bold text-yellow-900">
-                  {pendingOrders.filter(o => o.status === 'pending').length}
-                </div>
-              </div>
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <div className="text-sm text-blue-700 font-medium">Ready to Order</div>
-                <div className="text-2xl font-bold text-blue-900">
-                  {pendingOrders.filter(o => o.status === 'reviewed').length}
-                </div>
-              </div>
-              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                <div className="text-sm text-green-700 font-medium">Shipped</div>
-                <div className="text-2xl font-bold text-green-900">
-                  {pendingOrders.filter(o => o.status === 'shipped').length}
-                </div>
-              </div>
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-                <div className="text-sm text-gray-700 font-medium">Total Orders</div>
-                <div className="text-2xl font-bold text-gray-900">
-                  {pendingOrders.length}
-                </div>
-              </div>
-            </div>
+            {(() => {
+              const todayDate = new Date()
+              const todayKey = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, '0')}-${String(todayDate.getDate()).padStart(2, '0')}`
+              const weekAheadDate = new Date(todayDate)
+              weekAheadDate.setDate(weekAheadDate.getDate() + 7)
+              const weekAheadKey = `${weekAheadDate.getFullYear()}-${String(weekAheadDate.getMonth() + 1).padStart(2, '0')}-${String(weekAheadDate.getDate()).padStart(2, '0')}`
 
-            {/* Main Queue */}
-            <div className="bg-white rounded-lg shadow overflow-hidden">
-              <div className="p-4 border-b border-gray-200">
-                <h2 className="text-2xl font-bold text-gray-900 mb-2">Shipping Queue</h2>
-                <p className="text-sm text-gray-600">
-                  Upcoming shipments organized by timeline
-                </p>
-              </div>
+              const overdueCount = shippingScheduleItems.filter(item => item.next_ship_date < todayKey).length
+              const dueTodayCount = shippingScheduleItems.filter(item => item.next_ship_date === todayKey).length
+              const dueThisWeekCount = shippingScheduleItems.filter(item => item.next_ship_date > todayKey && item.next_ship_date <= weekAheadKey).length
 
-              {pendingOrders.length === 0 ? (
-                <div className="p-8 text-center text-gray-500">
-                  <p className="mb-2">No pending orders at this time.</p>
-                  <p className="text-sm">Orders will appear here automatically when clients are due for shipment.</p>
-                </div>
-              ) : (
-                <div className="divide-y divide-gray-200">
-                  {(() => {
-                    const today = new Date();
-                    const todayStr = today.toISOString().split('T')[0];
-                    const weekFromNow = new Date(today);
-                    weekFromNow.setDate(weekFromNow.getDate() + 7);
-                    const weekFromNowStr = weekFromNow.toISOString().split('T')[0];
-                    
-                    const todayOrders = pendingOrders.filter(o => o.ship_date === todayStr && o.status !== 'shipped');
-                    const thisWeekOrders = pendingOrders.filter(o => o.ship_date > todayStr && o.ship_date <= weekFromNowStr && o.status !== 'shipped');
-                    const laterOrders = pendingOrders.filter(o => o.ship_date > weekFromNowStr && o.status !== 'shipped');
-                    const shippedOrders = pendingOrders.filter(o => o.status === 'shipped');
-                    
-                    const renderOrders = (orders, title, showDate = true) => (
-                      orders.length > 0 && (
-                        <div>
-                          <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                            <h3 className="font-semibold text-gray-900">{title} ({orders.length})</h3>
-                          </div>
-                          {orders.map(order => (
-                            <div key={order.id} className="p-4 hover:bg-gray-50 border-b border-gray-100 last:border-b-0">
-                              <div className="flex justify-between items-start mb-3">
-                                <div className="flex-1">
-                                  <h3 className="font-semibold text-lg text-gray-900">{order.leads?.name}</h3>
-                                  {showDate && (
-                                    <p className="text-sm text-gray-600 mt-1">
-                                      📅 Ship: <span className="font-medium">{formatDate(order.ship_date)}</span>
-                                    </p>
-                                  )}
-                                  {order.status === 'shipped' && order.tracking_number && (
-                                    <p className="text-sm text-green-600 mt-1">
-                                      📦 Tracking: <span className="font-mono">{order.tracking_number}</span>
-                                    </p>
-                                  )}
-                                  {order.leads && (
-                                    <p className="text-xs text-gray-500 mt-1">
-                                      📍 {order.leads.address_line1}, {order.leads.city}, {order.leads.state} {order.leads.zip_code}
-                                    </p>
-                                  )}
-                                </div>
-                                <span className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap ml-4 ${
-                                  order.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                                  order.status === 'reviewed' ? 'bg-blue-100 text-blue-800' :
-                                  order.status === 'shipped' ? 'bg-green-100 text-green-800' :
-                                  'bg-gray-100 text-gray-800'
-                                }`}>
-                                  {order.status}
-                                </span>
-                              </div>
+              const firstDay = new Date(selectedYear, selectedMonth, 1)
+              const lastDay = new Date(selectedYear, selectedMonth + 1, 0)
+              const daysInMonth = lastDay.getDate()
+              const mondayStartOffset = (firstDay.getDay() + 6) % 7
+              const weekdayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
-                              {order.pending_order_items && order.pending_order_items.length > 0 && (
-                                <div className="mb-3 ml-4">
-                                  <div className="flex flex-wrap gap-2">
-                                    {order.pending_order_items.map(item => (
-                                      <div key={item.id} className="flex items-center gap-2 text-sm bg-blue-50 px-3 py-1.5 rounded-md border border-blue-200">
-                                        <span className="font-medium text-blue-900">
-                                          {item.products?.name}
-                                        </span>
-                                        <span className="text-blue-700">× {item.quantity}</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
+              const scheduleByDate = shippingScheduleItems.reduce((acc, item) => {
+                if (!acc[item.next_ship_date]) {
+                  acc[item.next_ship_date] = []
+                }
+                acc[item.next_ship_date].push(item)
+                return acc
+              }, {})
 
-                              {order.status !== 'shipped' && (
-                                <div className="flex gap-2 flex-wrap">
-                                  <button
-                                    onClick={async () => {
-                                      if (confirm('Mark this order as reviewed and ready to place?')) {
-                                        try {
-                                          const { error } = await supabase
-                                            .from('pending_orders')
-                                            .update({ status: 'reviewed' })
-                                            .eq('id', order.id)
-                                          if (error) throw error
-                                          await fetchPendingOrders()
-                                        } catch (error) {
-                                          console.error('Error updating order:', error)
-                                          alert('Failed to update order status')
-                                        }
-                                      }
-                                    }}
-                                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium"
-                                  >
-                                    ✓ Review Order
-                                  </button>
-                                  <button
-                                    onClick={async () => {
-                                      const trackingNumber = prompt('Enter tracking number:')
-                                      if (trackingNumber) {
-                                        try {
-                                          const { error } = await supabase
-                                            .from('pending_orders')
-                                            .update({ 
-                                              status: 'shipped',
-                                              tracking_number: trackingNumber,
-                                              shipped_at: new Date().toISOString()
-                                            })
-                                            .eq('id', order.id)
-                                          if (error) throw error
-                                          await fetchPendingOrders()
-                                          alert('Order marked as shipped!')
-                                        } catch (error) {
-                                          console.error('Error updating order:', error)
-                                          alert('Failed to mark as shipped')
-                                        }
-                                      }
-                                    }}
-                                    className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium"
-                                  >
-                                    📦 Mark Shipped
-                                  </button>
-                                  <button
-                                    onClick={async () => {
-                                      if (confirm('Cancel this order?')) {
-                                        try {
-                                          const { error } = await supabase
-                                            .from('pending_orders')
-                                            .update({ status: 'cancelled' })
-                                            .eq('id', order.id)
-                                          if (error) throw error
-                                          await fetchPendingOrders()
-                                        } catch (error) {
-                                          console.error('Error cancelling order:', error)
-                                          alert('Failed to cancel order')
-                                        }
-                                      }
-                                    }}
-                                    className="px-4 py-2 bg-red-100 text-red-700 rounded-md hover:bg-red-200 text-sm font-medium"
-                                  >
-                                    ✕ Cancel
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          ))}
+              const calendarCells = []
+              for (let index = 0; index < mondayStartOffset; index++) {
+                calendarCells.push(null)
+              }
+              for (let day = 1; day <= daysInMonth; day++) {
+                const dateKey = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+                calendarCells.push({ day, dateKey })
+              }
+
+              const selectedDayItems = scheduleByDate[selectedShippingDate] || []
+
+              return (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                      <div className="text-sm text-red-700 font-medium">Overdue</div>
+                      <div className="text-2xl font-bold text-red-900">{overdueCount}</div>
+                    </div>
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                      <div className="text-sm text-yellow-700 font-medium">Due Today</div>
+                      <div className="text-2xl font-bold text-yellow-900">{dueTodayCount}</div>
+                    </div>
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <div className="text-sm text-blue-700 font-medium">Due in 7 Days</div>
+                      <div className="text-2xl font-bold text-blue-900">{dueThisWeekCount}</div>
+                    </div>
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                      <div className="text-sm text-gray-700 font-medium">Total Scheduled</div>
+                      <div className="text-2xl font-bold text-gray-900">{shippingScheduleItems.length}</div>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-lg shadow overflow-hidden">
+                    <div className="p-4 border-b border-gray-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                      <div>
+                        <h2 className="text-2xl font-bold text-gray-900">Shipping Queue Calendar</h2>
+                        <p className="text-sm text-gray-600">Click a day to view all products due for that date.</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            if (selectedMonth === 0) {
+                              setSelectedMonth(11)
+                              setSelectedYear(selectedYear - 1)
+                            } else {
+                              setSelectedMonth(selectedMonth - 1)
+                            }
+                          }}
+                          className="px-3 py-2 border border-gray-300 rounded-md hover:bg-gray-50 text-sm"
+                        >
+                          ← Prev
+                        </button>
+                        <div className="min-w-[170px] text-center font-semibold text-gray-900">
+                          {new Date(selectedYear, selectedMonth).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
                         </div>
-                      )
-                    );
+                        <button
+                          onClick={() => {
+                            if (selectedMonth === 11) {
+                              setSelectedMonth(0)
+                              setSelectedYear(selectedYear + 1)
+                            } else {
+                              setSelectedMonth(selectedMonth + 1)
+                            }
+                          }}
+                          className="px-3 py-2 border border-gray-300 rounded-md hover:bg-gray-50 text-sm"
+                        >
+                          Next →
+                        </button>
+                        <button
+                          onClick={() => {
+                            const now = new Date()
+                            const nowKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+                            setSelectedMonth(now.getMonth())
+                            setSelectedYear(now.getFullYear())
+                            setSelectedShippingDate(nowKey)
+                          }}
+                          className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm"
+                        >
+                          Today
+                        </button>
+                      </div>
+                    </div>
 
-                    return (
-                      <>
-                        {renderOrders(todayOrders, '🔥 Due Today')}
-                        {renderOrders(thisWeekOrders, '📅 This Week (Next 7 Days)')}
-                        {renderOrders(laterOrders, '📆 Later')}
-                        {renderOrders(shippedOrders, '✅ Shipped', false)}
-                      </>
-                    );
-                  })()}
-                </div>
-              )}
-            </div>
+                    <div className="p-4">
+                      <div className="grid grid-cols-7 gap-1 mb-1">
+                        {weekdayLabels.map(label => (
+                          <div key={label} className="py-2 text-center text-sm font-semibold text-gray-700 border-b border-gray-200">
+                            {label}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-7 gap-1">
+                        {calendarCells.map((cell, index) => {
+                          if (!cell) {
+                            return <div key={`blank-${index}`} className="h-28 bg-gray-50 rounded border border-gray-100" />
+                          }
+
+                          const items = scheduleByDate[cell.dateKey] || []
+                          const uniqueClients = [...new Set(items.map(item => item.client_name))]
+                          const isSelected = selectedShippingDate === cell.dateKey
+                          const isToday = cell.dateKey === todayKey
+
+                          return (
+                            <button
+                              key={cell.dateKey}
+                              type="button"
+                              onClick={() => setSelectedShippingDate(cell.dateKey)}
+                              className={`h-28 text-left p-2 rounded border transition-colors ${
+                                isSelected
+                                  ? 'border-blue-500 bg-blue-50'
+                                  : isToday
+                                    ? 'border-yellow-400 bg-yellow-50'
+                                    : items.length > 0
+                                      ? 'border-green-300 bg-green-50 hover:bg-green-100'
+                                      : 'border-gray-200 bg-white hover:bg-gray-50'
+                              }`}
+                            >
+                              <div className="text-sm font-semibold text-gray-900 mb-1">{cell.day}</div>
+                              <div className="space-y-0.5 overflow-y-auto max-h-16">
+                                {uniqueClients.slice(0, 2).map(clientName => (
+                                  <div key={clientName} className="text-xs text-gray-700 truncate">{clientName}</div>
+                                ))}
+                                {uniqueClients.length > 2 && (
+                                  <div className="text-xs text-gray-500">+{uniqueClients.length - 2} more</div>
+                                )}
+                              </div>
+                            </button>
+                          )
+                        })}
+                      </div>
+
+                      <div className="mt-4 border border-gray-200 rounded-lg overflow-hidden">
+                        <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
+                          <h3 className="font-semibold text-gray-900">
+                            Products Due on {formatDate(selectedShippingDate)} ({selectedDayItems.length})
+                          </h3>
+                        </div>
+                        {selectedDayItems.length === 0 ? (
+                          <div className="px-4 py-6 text-sm text-gray-500">No products scheduled for this day.</div>
+                        ) : (
+                          <div className="divide-y divide-gray-100">
+                            {selectedDayItems.map(item => (
+                              <div key={item.id} className="px-4 py-3 flex items-center justify-between gap-3">
+                                <div>
+                                  <div className="font-medium text-gray-900">{item.client_name}</div>
+                                  <div className="text-sm text-gray-600">{item.product_name} × {item.quantity}</div>
+                                </div>
+                                <button
+                                  onClick={() => {
+                                    setShippingClient(item)
+                                    setNextShipDateInput('')
+                                    setShowShippingModal(true)
+                                  }}
+                                  className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md text-sm font-medium"
+                                >
+                                  ✓ Mark Shipped
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )
+            })()}
           </div>
         )}
         </div> {/* End View Content (p-6) */}
@@ -5063,47 +5107,47 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         </div>
       )}
 
-      {/* Shipping Duration Modal */}
+      {/* Mark Shipped Modal - Select Next Ship Date */}
       {showShippingModal && shippingClient && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-md shadow-xl">
-            <h3 className="text-xl font-bold text-gray-900 mb-4">Mark as Shipped</h3>
-            <p className="text-gray-600 mb-6">
-              Confirm shipment for <span className="font-semibold">{shippingClient.name}</span>. How long until the next shipment?
+            <h3 className="text-xl font-bold text-gray-900 mb-2">Mark as Shipped</h3>
+            <p className="text-sm text-gray-600 mb-6">
+              <span className="font-semibold">{shippingClient.product_name}</span> for <span className="font-semibold">{shippingClient.client_name}</span>
             </p>
-            <div className="space-y-3">
-              <button
-                onClick={() => handleMarkShipped('end_of_month')}
-                disabled={updating}
-                className="w-full bg-yellow-500 hover:bg-yellow-600 disabled:bg-gray-400 text-white font-semibold py-3 px-6 rounded-lg transition-colors"
-              >
-                Till End of Month
-              </button>
-              <button
-                onClick={() => handleMarkShipped('1_month')}
-                disabled={updating}
-                className="w-full bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white font-semibold py-3 px-6 rounded-lg transition-colors"
-              >
-                1 Month
-              </button>
-              <button
-                onClick={() => handleMarkShipped('3_month')}
-                disabled={updating}
-                className="w-full bg-purple-500 hover:bg-purple-600 disabled:bg-gray-400 text-white font-semibold py-3 px-6 rounded-lg transition-colors"
-              >
-                3 Months
-              </button>
-              <button
-                onClick={() => {
-                  setShowShippingModal(false)
-                  setShippingClient(null)
-                }}
-                disabled={updating}
-                className="w-full bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 text-gray-700 font-semibold py-3 px-6 rounded-lg transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
+            <form onSubmit={(e) => { e.preventDefault(); handleMarkShipped(); }} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Next Shipping Date *</label>
+                <input
+                  type="date"
+                  value={nextShipDateInput}
+                  onChange={(e) => setNextShipDateInput(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowShippingModal(false)
+                    setShippingClient(null)
+                    setNextShipDateInput('')
+                  }}
+                  disabled={updating}
+                  className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:bg-gray-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={updating || !nextShipDateInput}
+                  className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white rounded-lg font-medium"
+                >
+                  {updating ? 'Saving...' : 'Confirm Shipped'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -5334,12 +5378,13 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                     lead_id: assignProductClient.id,
                     product_id: assignProductForm.product_id,
                     quantity: parseInt(assignProductForm.quantity),
-                    frequency_days: parseInt(assignProductForm.frequency_days)
+                    next_ship_date: assignProductForm.next_ship_date
                   }])
                 if (error) throw error
                 await fetchClientProducts(assignProductClient.id)
+                await fetchShippingSchedule()
                 setShowAssignProductModal(false)
-                setAssignProductForm({ product_id: '', quantity: 1, frequency_days: 30 })
+                setAssignProductForm({ product_id: '', quantity: 1, next_ship_date: new Date().toISOString().split('T')[0] })
                 alert('Product assigned successfully!')
               } catch (error) {
                 console.error('Error assigning product:', error)
@@ -5374,18 +5419,14 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Shipping Frequency *</label>
-                <select
-                  value={assignProductForm.frequency_days}
-                  onChange={(e) => setAssignProductForm({ ...assignProductForm, frequency_days: e.target.value })}
+                <label className="block text-sm font-medium text-gray-700 mb-1">Next Shipping Date *</label>
+                <input
+                  type="date"
+                  value={assignProductForm.next_ship_date}
+                  onChange={(e) => setAssignProductForm({ ...assignProductForm, next_ship_date: e.target.value })}
                   required
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="30">Every 30 days (Monthly)</option>
-                  <option value="90">Every 90 days (Quarterly)</option>
-                  <option value="60">Every 60 days</option>
-                  <option value="14">Every 14 days</option>
-                </select>
+                />
               </div>
               <div className="flex gap-3 justify-end">
                 <button
@@ -5393,7 +5434,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   onClick={() => {
                     setShowAssignProductModal(false)
                     setAssignProductClient(null)
-                    setAssignProductForm({ product_id: '', quantity: 1, frequency_days: 30 })
+                    setAssignProductForm({ product_id: '', quantity: 1, next_ship_date: new Date().toISOString().split('T')[0] })
                   }}
                   className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
                 >
@@ -5869,6 +5910,128 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
                 >
                   Add Expense
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add/Edit Table Modal */}
+      {showAddTableModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg p-6 w-full max-w-2xl my-8">
+            <h3 className="text-xl font-bold text-gray-900 mb-6">
+              {editingTable ? 'Edit Table' : 'Create New Table'}
+            </h3>
+            <form onSubmit={createOrUpdateTable}>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Left column: Table info */}
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Table Name *</label>
+                    <input
+                      type="text"
+                      value={newTableForm.name}
+                      onChange={(e) => setNewTableForm({ ...newTableForm, name: e.target.value })}
+                      placeholder="e.g., Customer Orders"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                    <textarea
+                      value={newTableForm.description || ''}
+                      onChange={(e) => setNewTableForm({ ...newTableForm, description: e.target.value })}
+                      placeholder="What this table tracks..."
+                      rows="3"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Right column: Columns */}
+                <div>
+                  <div className="flex justify-between items-center mb-3">
+                    <label className="block text-sm font-bold text-gray-900">Define Columns *</label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewTableForm({
+                          ...newTableForm,
+                          columns: [...newTableForm.columns, '']
+                        })
+                      }}
+                      className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm font-medium"
+                    >
+                      + Add Column
+                    </button>
+                  </div>
+                  <div className="border-2 border-dashed border-blue-400 rounded-lg p-4 bg-blue-50 space-y-2 max-h-48 overflow-y-auto">
+                    {newTableForm.columns.length === 0 ? (
+                      <div className="text-center py-6">
+                        <p className="text-sm font-medium text-blue-700 mb-2">No columns yet</p>
+                        <p className="text-xs text-blue-600">Click "+ Add Column" to start defining your table structure</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {newTableForm.columns.map((col, idx) => (
+                          <div key={idx} className="flex gap-2">
+                            <span className="text-xs font-bold text-gray-500 bg-white px-2 py-2 rounded border border-gray-200">
+                              Col {idx + 1}
+                            </span>
+                            <input
+                              type="text"
+                              value={col}
+                              onChange={(e) => {
+                                const newCols = [...newTableForm.columns]
+                                newCols[idx] = e.target.value
+                                setNewTableForm({ ...newTableForm, columns: newCols })
+                              }}
+                              placeholder={`Column name (e.g., "Product Name")`}
+                              className="flex-1 px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              autoFocus={col === ''}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNewTableForm({
+                                  ...newTableForm,
+                                  columns: newTableForm.columns.filter((_, i) => i !== idx)
+                                })
+                              }}
+                              className="bg-red-600 hover:bg-red-700 text-white px-2 py-2 rounded text-xs font-medium"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">
+                    💡 Add column names like: Product, Quantity, Price, Email, Phone, etc.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-3 mt-8">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddTableModal(false)
+                    setEditingTable(null)
+                    setNewTableForm({ name: '', description: '', columns: [] })
+                  }}
+                  className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium"
+                >
+                  {editingTable ? 'Update' : 'Create'} Table
                 </button>
               </div>
             </form>

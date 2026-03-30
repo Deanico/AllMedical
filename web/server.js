@@ -99,49 +99,73 @@ app.post('/api/sync-google-sheets', async (req, res) => {
       return res.status(200).json({ added: 0, skipped: 0, message: 'No data found in spreadsheet' })
     }
 
+    const rowLimit = Math.max(1, Number(process.env.GOOGLE_SHEET_ROW_LIMIT || 50))
+    const recentRows = rows.slice(-rowLimit)
+
     // Column mappings (O=14, P=15, Q=16, R=17 in 0-indexed)
     const insuranceCol = 14  // Column O
     const emailCol = 15      // Column P
     const nameCol = 16       // Column Q
     const phoneCol = 17      // Column R
 
-    let added = 0
+    const clean = (value) => String(value ?? '').trim()
+    const candidates = []
     let skipped = 0
 
-    // Process each row
-    for (const row of rows) {
-      const email = row[emailCol]?.trim()
-      const name = row[nameCol]?.trim()
-      const phone = row[phoneCol]?.trim()
-      const insurance = row[insuranceCol]?.trim() || ''
+    for (const row of recentRows) {
+      const email = clean(row[emailCol]).toLowerCase()
+      const name = clean(row[nameCol])
+      const phone = clean(row[phoneCol])
+      const insurance = clean(row[insuranceCol])
 
-      // Skip rows without email (required field)
       if (!email || !name) {
         skipped++
         continue
       }
 
-      // Check if lead already exists (by email)
-      const { data: existing } = await supabase
-        .from('leads')
-        .select('id')
-        .eq('email', email)
-        .single()
+      candidates.push({
+        name,
+        email,
+        phone,
+        insurance
+      })
+    }
 
-      if (existing) {
-        // Lead already exists, skip
+    if (candidates.length === 0) {
+      return res.status(200).json({
+        added: 0,
+        skipped,
+        processed: recentRows.length,
+        totalRows: rows.length,
+        rowLimit,
+        message: 'No valid rows found in selected range'
+      })
+    }
+
+    const uniqueEmails = [...new Set(candidates.map(candidate => candidate.email))]
+    const { data: existingLeads, error: existingError } = await supabase
+      .from('leads')
+      .select('email')
+      .in('email', uniqueEmails)
+
+    if (existingError) throw existingError
+
+    const existingEmailSet = new Set((existingLeads || []).map(lead => String(lead.email || '').toLowerCase()))
+
+    let added = 0
+    for (const candidate of candidates) {
+      if (existingEmailSet.has(candidate.email)) {
         skipped++
         continue
       }
 
-      // Insert new lead
       const { error: insertError } = await supabase
         .from('leads')
         .insert([{
-          name: name,
-          email: email,
-          phone: phone || '',
-          insurance: insurance,
+          name: candidate.name,
+          email: candidate.email,
+          phone: candidate.phone,
+          insurance: candidate.insurance,
           notes: 'Source: Google Sheets',
           stage: 'new'
         }])
@@ -149,15 +173,20 @@ app.post('/api/sync-google-sheets', async (req, res) => {
       if (insertError) {
         console.error('Insert error:', insertError)
         skipped++
-      } else {
-        added++
+        continue
       }
+
+      existingEmailSet.add(candidate.email)
+      added++
     }
 
     return res.status(200).json({
       added: added,
       skipped: skipped,
-      message: `Successfully synced ${added} new leads, skipped ${skipped} duplicates or invalid rows`
+      processed: recentRows.length,
+      totalRows: rows.length,
+      rowLimit,
+      message: `Successfully synced ${added} new leads from the latest ${recentRows.length} rows, skipped ${skipped}`
     })
 
   } catch (error) {

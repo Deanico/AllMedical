@@ -68,6 +68,9 @@ module.exports = async function (context, req) {
       return;
     }
 
+    const rowLimit = Math.max(1, Number(process.env.GOOGLE_SHEET_ROW_LIMIT || 50));
+    const recentRows = rows.slice(-rowLimit);
+
     // Get column mappings from environment (default: A=name, B=email, C=phone, D=insurance, E=notes)
     const nameCol = parseInt(process.env.SHEET_NAME_COLUMN || '0');
     const emailCol = parseInt(process.env.SHEET_EMAIL_COLUMN || '1');
@@ -75,54 +78,84 @@ module.exports = async function (context, req) {
     const insuranceCol = parseInt(process.env.SHEET_INSURANCE_COLUMN || '3');
     const notesCol = parseInt(process.env.SHEET_NOTES_COLUMN || '4');
 
-    let added = 0;
+    const clean = (value) => String(value ?? '').trim();
+    const candidates = [];
     let skipped = 0;
 
-    // Process each row
-    for (const row of rows) {
-      const email = row[emailCol]?.trim();
-      const name = row[nameCol]?.trim();
-      const phone = row[phoneCol]?.trim();
-      const insurance = row[insuranceCol]?.trim() || '';
-      const notes = row[notesCol]?.trim() || '';
+    for (const row of recentRows) {
+      const email = clean(row[emailCol]).toLowerCase();
+      const name = clean(row[nameCol]);
+      const phone = clean(row[phoneCol]);
+      const insurance = clean(row[insuranceCol]);
+      const notes = clean(row[notesCol]);
 
-      // Skip rows without email (required field)
       if (!email || !name) {
         skipped++;
         continue;
       }
 
-      // Check if lead already exists (by email)
-      const { data: existing, error: checkError } = await supabase
-        .from('leads')
-        .select('id')
-        .eq('email', email)
-        .single();
+      candidates.push({
+        name,
+        email,
+        phone,
+        insurance,
+        notes
+      });
+    }
 
-      if (existing) {
-        // Lead already exists, skip
+    if (candidates.length === 0) {
+      context.res = {
+        status: 200,
+        body: {
+          added: 0,
+          skipped,
+          processed: recentRows.length,
+          totalRows: rows.length,
+          rowLimit,
+          message: 'No valid rows found in selected range'
+        }
+      };
+      return;
+    }
+
+    const uniqueEmails = [...new Set(candidates.map((candidate) => candidate.email))];
+    const { data: existingLeads, error: existingError } = await supabase
+      .from('leads')
+      .select('email')
+      .in('email', uniqueEmails);
+
+    if (existingError) {
+      throw existingError;
+    }
+
+    const existingEmailSet = new Set((existingLeads || []).map((lead) => String(lead.email || '').toLowerCase()));
+
+    let added = 0;
+    for (const candidate of candidates) {
+      if (existingEmailSet.has(candidate.email)) {
         skipped++;
         continue;
       }
 
-      // Insert new lead
       const { error: insertError } = await supabase
         .from('leads')
         .insert([{
-          name: name,
-          email: email,
-          phone: phone || '',
-          insurance: insurance,
-          notes: notes ? `${notes} (Source: Google Sheets)` : 'Source: Google Sheets',
+          name: candidate.name,
+          email: candidate.email,
+          phone: candidate.phone,
+          insurance: candidate.insurance,
+          notes: candidate.notes ? `${candidate.notes} (Source: Google Sheets)` : 'Source: Google Sheets',
           stage: 'new'
         }]);
 
       if (insertError) {
         context.log.error('Insert error:', insertError);
         skipped++;
-      } else {
-        added++;
+        continue;
       }
+
+      existingEmailSet.add(candidate.email);
+      added++;
     }
 
     context.res = {
@@ -130,7 +163,10 @@ module.exports = async function (context, req) {
       body: {
         added: added,
         skipped: skipped,
-        message: `Successfully synced ${added} new leads, skipped ${skipped} duplicates or invalid rows`
+        processed: recentRows.length,
+        totalRows: rows.length,
+        rowLimit,
+        message: `Successfully synced ${added} new leads from the latest ${recentRows.length} rows, skipped ${skipped}`
       }
     };
 
