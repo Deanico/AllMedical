@@ -21,8 +21,8 @@ cp .env.example .env
 
 Edit `.env`:
 ```env
-VITE_SUPABASE_URL=your_supabase_url
-VITE_SUPABASE_ANON_KEY=your_anon_key
+SUPABASE_URL=your_supabase_url
+SUPABASE_ANON_KEY=your_anon_key
 TESTSTRIPZ_EMAIL=your_teststripz_account@email.com
 TESTSTRIPZ_PASSWORD=your_password
 

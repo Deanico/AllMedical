@@ -114,6 +114,13 @@ ALTER TABLE pending_orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pending_order_items ENABLE ROW LEVEL SECURITY;
 
 -- Allow public access (since we're using admin authentication at app level)
+DROP POLICY IF EXISTS "Public access to products" ON products;
+DROP POLICY IF EXISTS "Public access to suppliers" ON suppliers;
+DROP POLICY IF EXISTS "Public access to product_suppliers" ON product_suppliers;
+DROP POLICY IF EXISTS "Public access to client_products" ON client_products;
+DROP POLICY IF EXISTS "Public access to pending_orders" ON pending_orders;
+DROP POLICY IF EXISTS "Public access to pending_order_items" ON pending_order_items;
+
 CREATE POLICY "Public access to products" ON products FOR ALL TO public USING (true) WITH CHECK (true);
 CREATE POLICY "Public access to suppliers" ON suppliers FOR ALL TO public USING (true) WITH CHECK (true);
 CREATE POLICY "Public access to product_suppliers" ON product_suppliers FOR ALL TO public USING (true) WITH CHECK (true);

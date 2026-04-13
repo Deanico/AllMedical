@@ -10,10 +10,13 @@ const __dirname = dirname(__filename);
 // Load environment variables
 dotenv.config({ path: join(__dirname, '.env') });
 
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+
 // Initialize Supabase client
 const supabase = createClient(
-  process.env.VITE_SUPABASE_URL,
-  process.env.VITE_SUPABASE_ANON_KEY
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY
 );
 
 // Configuration
@@ -24,10 +27,90 @@ const CONFIG = {
   testMode: process.argv.includes('--test')
 };
 
+const SELECTORS = {
+  loginEmail: ['#CustomerEmail', 'input[name="customer[email]"]', 'input[type="email"]'],
+  loginPassword: ['#CustomerPassword', 'input[name="customer[password]"]', 'input[type="password"]'],
+  loginSubmit: ['button[type="submit"]', 'input[type="submit"]', 'button:has-text("Sign In")'],
+  accountIndicator: ['a:has-text("Log Out")', 'a:has-text("Account")', 'a[href*="/account"]'],
+  searchInput: ['input[type="search"]', 'input[name="q"]', '#Search', '#search'],
+  productResult: ['.product-item a', '.grid-product a', 'a[href*="/products/"]'],
+  quantityInput: ['#quantity', 'input[name="quantity"]', 'input[type="number"]'],
+  addToCartButton: ['#AddToCartText', 'button:has-text("Add to cart")', 'button[name="add"]'],
+  cartButton: ['#SVGDoc', 'a[href*="/cart"]', 'button[aria-label*="cart" i]'],
+  checkoutButton: ['#slidedown-cart > div.has-items > div.actions > button:nth-child(2)', 'a[href*="/checkout"]', 'button:has-text("Checkout")'],
+  shippingFirstName: ['#TextField0', 'input[name="firstName"]', 'input[name="checkout[shipping_address][first_name]"]'],
+  shippingLastName: ['#TextField1', 'input[name="lastName"]', 'input[name="checkout[shipping_address][last_name]"]'],
+  shippingAddress1: ['#shipping-address1', 'input[name="address1"]', 'input[name="checkout[shipping_address][address1]"]'],
+  shippingCity: ['#TextField3', 'input[name="city"]', 'input[name="checkout[shipping_address][city]"]'],
+  shippingState: ['#Select1', 'select[name="provinceCode"]', 'select[name="checkout[shipping_address][province]"]'],
+  shippingZip: ['#TextField4', 'input[name="postalCode"]', 'input[name="checkout[shipping_address][zip]"]'],
+  shippingPhone: ['#TextField5', 'input[name="phone"]', 'input[name="checkout[shipping_address][phone]"]'],
+  continueToPayment: ['button:has-text("Continue to payment")', 'button[type="submit"]']
+};
+
 class TeststripzAutomation {
   constructor() {
     this.browser = null;
     this.page = null;
+  }
+
+  async getFirstVisibleLocator(selectors) {
+    for (const selector of selectors) {
+      const locator = this.page.locator(selector).first();
+      if (await locator.count() > 0) {
+        return locator;
+      }
+    }
+
+    return null;
+  }
+
+  async fillFirstAvailable(selectors, value, fieldName) {
+    const locator = await this.getFirstVisibleLocator(selectors);
+    if (!locator) {
+      throw new Error(`Could not find input for ${fieldName}`);
+    }
+
+    await locator.fill(value ?? '');
+  }
+
+  async clickFirstAvailable(selectors, fieldName) {
+    const locator = await this.getFirstVisibleLocator(selectors);
+    if (!locator) {
+      throw new Error(`Could not find element for ${fieldName}`);
+    }
+
+    await locator.click();
+  }
+
+  async waitForAnySelector(selectors, timeout = 10000) {
+    const endAt = Date.now() + timeout;
+
+    while (Date.now() < endAt) {
+      for (const selector of selectors) {
+        if (await this.page.locator(selector).count() > 0) {
+          return selector;
+        }
+      }
+
+      await this.page.waitForTimeout(250);
+    }
+
+    throw new Error(`Timed out waiting for selectors: ${selectors.join(', ')}`);
+  }
+
+  async updateOrder(orderId, updates) {
+    const { error } = await supabase
+      .from('pending_orders')
+      .update({
+        ...updates,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', orderId);
+
+    if (error) {
+      throw new Error(`Failed to update order ${orderId}: ${error.message}`);
+    }
   }
 
   async init() {
@@ -47,18 +130,18 @@ class TeststripzAutomation {
       await this.page.goto('https://shop.teststripz.com/account/login', { waitUntil: 'networkidle' });
       
       // Wait for login form to appear
-      await this.page.waitForSelector('#CustomerEmail', { timeout: 10000 });
+      await this.waitForAnySelector(SELECTORS.loginEmail, 15000);
       
       console.log('   Found login form');
       
       // Fill in credentials
-      await this.page.fill('#CustomerEmail', process.env.TESTSTRIPZ_EMAIL);
-      await this.page.fill('#CustomerPassword', process.env.TESTSTRIPZ_PASSWORD);
+      await this.fillFirstAvailable(SELECTORS.loginEmail, process.env.TESTSTRIPZ_EMAIL, 'login email');
+      await this.fillFirstAvailable(SELECTORS.loginPassword, process.env.TESTSTRIPZ_PASSWORD, 'login password');
       
       console.log('   Filled credentials');
       
       // Click login button (submit form)
-      await this.page.click('button[type="submit"], input[type="submit"]');
+      await this.clickFirstAvailable(SELECTORS.loginSubmit, 'login submit button');
       
       console.log('   Clicked submit button');
       
@@ -66,7 +149,7 @@ class TeststripzAutomation {
       await this.page.waitForLoadState('networkidle');
       
       // Check if we're logged in (look for account link or logout button)
-      const loggedIn = await this.page.locator('a:has-text("Log Out"), a:has-text("Account")').count() > 0;
+      const loggedIn = await this.getFirstVisibleLocator(SELECTORS.accountIndicator);
       
       if (!loggedIn) {
         throw new Error('Login may have failed - could not verify logged in state');
@@ -133,11 +216,11 @@ class TeststripzAutomation {
       console.log('\n   🛒 All items added to cart');
       
       // Click cart icon to view cart
-      await this.page.click('#SVGDoc');
+      await this.clickFirstAvailable(SELECTORS.cartButton, 'cart button');
       await this.page.waitForTimeout(1000);
       
       // Click checkout button in cart dropdown
-      await this.page.click('#slidedown-cart > div.has-items > div.actions > button:nth-child(2)');
+      await this.clickFirstAvailable(SELECTORS.checkoutButton, 'checkout button');
       await this.page.waitForLoadState('networkidle');
       
       console.log('   💳 Navigated to checkout');
@@ -168,7 +251,7 @@ class TeststripzAutomation {
       } else {
         // Click continue to payment (user will handle payment manually)
         console.log('   ➡️  Clicking "Continue to Payment"...');
-        await this.page.click('button:has-text("Continue to payment"), button[type="submit"]');
+        await this.clickFirstAvailable(SELECTORS.continueToPayment, 'continue to payment button');
         
         console.log('   ⏸️  STOPPED - Please complete payment manually');
         console.log('   Browser will remain open. Press Enter when order is complete...');
@@ -189,7 +272,7 @@ class TeststripzAutomation {
     
     try {
       // Wait for shipping form to load
-      await this.page.waitForSelector('#TextField0', { timeout: 10000 });
+      await this.waitForAnySelector(SELECTORS.shippingFirstName, 15000);
       
       // Split name into first and last
       const nameParts = client.name.split(' ');
@@ -197,19 +280,23 @@ class TeststripzAutomation {
       const lastName = nameParts.slice(1).join(' ') || '';
       
       // Fill in shipping details
-      await this.page.fill('#TextField0', firstName);
-      await this.page.fill('#TextField1', lastName);
-      await this.page.fill('#shipping-address1', client.address_line1);
-      await this.page.fill('#TextField3', client.city);
+      await this.fillFirstAvailable(SELECTORS.shippingFirstName, firstName, 'shipping first name');
+      await this.fillFirstAvailable(SELECTORS.shippingLastName, lastName, 'shipping last name');
+      await this.fillFirstAvailable(SELECTORS.shippingAddress1, client.address_line1 || '', 'shipping address line 1');
+      await this.fillFirstAvailable(SELECTORS.shippingCity, client.city || '', 'shipping city');
       
       // State is a dropdown
-      await this.page.selectOption('#Select1', client.state);
+      const stateLocator = await this.getFirstVisibleLocator(SELECTORS.shippingState);
+      if (!stateLocator) {
+        throw new Error('Could not find shipping state dropdown');
+      }
+      await stateLocator.selectOption(client.state || '');
       
-      await this.page.fill('#TextField4', client.zip_code);
+      await this.fillFirstAvailable(SELECTORS.shippingZip, client.zip_code || '', 'shipping zip');
       
       // Phone is optional
       if (client.phone) {
-        await this.page.fill('#TextField5', client.phone);
+        await this.fillFirstAvailable(SELECTORS.shippingPhone, client.phone, 'shipping phone');
       }
       
       console.log('   ✅ Address filled');
@@ -222,12 +309,17 @@ class TeststripzAutomation {
     console.log(`   🛒 Adding: ${item.products.name} (Qty: ${item.quantity})`);
     
     try {
-      // Search for product by SKU or name - use input[type="search"] to avoid matching body#search
-      await this.page.waitForSelector('input[type="search"]', { timeout: 5000 });
+      // Search for product by SKU or name
+      await this.waitForAnySelector(SELECTORS.searchInput, 10000);
+      const searchInput = await this.getFirstVisibleLocator(SELECTORS.searchInput);
+      if (!searchInput) {
+        throw new Error('Could not find search input');
+      }
       
       const searchTerm = item.products.sku || item.products.name;
-      await this.page.fill('input[type="search"]', searchTerm);
-      await this.page.press('input[type="search"]', 'Enter');
+      await searchInput.fill('');
+      await searchInput.fill(searchTerm);
+      await searchInput.press('Enter');
       
       console.log(`      Searching for: ${searchTerm}`);
       
@@ -236,7 +328,11 @@ class TeststripzAutomation {
       await this.page.waitForTimeout(1000);
       
       // Click on first product result (look for any product link)
-      const firstProduct = await this.page.locator('.product-item a, .grid-product a, a[href*="/products/"]').first();
+      await this.waitForAnySelector(SELECTORS.productResult, 15000);
+      const firstProduct = await this.getFirstVisibleLocator(SELECTORS.productResult);
+      if (!firstProduct) {
+        throw new Error(`No product results found for ${searchTerm}`);
+      }
       await firstProduct.click();
       
       console.log(`      Clicked product`);
@@ -245,13 +341,13 @@ class TeststripzAutomation {
       await this.page.waitForLoadState('networkidle');
       
       // Set quantity
-      await this.page.waitForSelector('#quantity', { timeout: 5000 });
-      await this.page.fill('#quantity', item.quantity.toString());
+      await this.waitForAnySelector(SELECTORS.quantityInput, 10000);
+      await this.fillFirstAvailable(SELECTORS.quantityInput, item.quantity.toString(), 'product quantity');
       
       console.log(`      Set quantity to ${item.quantity}`);
       
       // Add to cart
-      await this.page.click('#AddToCartText');
+      await this.clickFirstAvailable(SELECTORS.addToCartButton, 'add to cart button');
       
       // Wait for cart to update
       await this.page.waitForTimeout(2000);
@@ -276,10 +372,16 @@ class TeststripzAutomation {
 
   async waitForUserConfirmation() {
     return new Promise((resolve) => {
+      if (!process.stdin.isTTY) {
+        setTimeout(resolve, 1000);
+        return;
+      }
+
       process.stdin.setRawMode(true);
       process.stdin.resume();
       process.stdin.once('data', () => {
         process.stdin.setRawMode(false);
+        process.stdin.pause();
         resolve();
       });
     });
@@ -293,6 +395,14 @@ class TeststripzAutomation {
 
 // Main execution
 async function main() {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    throw new Error('Missing Supabase credentials. Set SUPABASE_URL and SUPABASE_ANON_KEY in web/automation/.env');
+  }
+
+  if (!process.env.TESTSTRIPZ_EMAIL || !process.env.TESTSTRIPZ_PASSWORD) {
+    throw new Error('Missing Teststripz credentials. Set TESTSTRIPZ_EMAIL and TESTSTRIPZ_PASSWORD in web/automation/.env');
+  }
+
   const automation = new TeststripzAutomation();
   
   try {
@@ -316,6 +426,28 @@ async function main() {
     for (const order of orders) {
       const result = await automation.placeOrder(order);
       results.push({ order: order.leads.name, ...result });
+
+      if (result.success && !result.testMode) {
+        try {
+          await automation.updateOrder(order.id, {
+            status: 'ordered',
+            order_placed_at: new Date().toISOString(),
+            notes: 'Ordered by teststripz automation'
+          });
+        } catch (updateError) {
+          console.warn(`⚠️  Order placed but DB status update failed for ${order.leads.name}: ${updateError.message}`);
+        }
+      }
+
+      if (!result.success) {
+        try {
+          await automation.updateOrder(order.id, {
+            notes: `Automation error: ${result.error}`
+          });
+        } catch (updateError) {
+          console.warn(`⚠️  Failed to save automation error note for ${order.leads.name}: ${updateError.message}`);
+        }
+      }
       
       // Wait between orders
       if (orders.indexOf(order) < orders.length - 1) {

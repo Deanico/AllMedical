@@ -1,13 +1,27 @@
 import { chromium } from 'playwright';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+dotenv.config({ path: join(__dirname, '.env') });
+
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
 
 const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY
 );
+
+const SUPPORTED_SUPPLIERS = new Set([
+  'teststripz',
+  'rapidrx usa',
+  'diabetic warehouse'
+]);
 
 class PriceChecker {
   constructor() {
@@ -239,10 +253,24 @@ class PriceChecker {
 
     console.log(`✅ Found ${mappings.length} product-supplier mappings to check\n`);
 
+    const supplierCoverage = (mappings || []).reduce((acc, mapping) => {
+      const supplierName = mapping.suppliers?.name || 'Unknown Supplier';
+      acc[supplierName] = (acc[supplierName] || 0) + 1;
+      return acc;
+    }, {});
+
+    console.log('🏷️ Supplier coverage:');
+    Object.entries(supplierCoverage).forEach(([supplierName, count]) => {
+      const normalized = supplierName.toLowerCase();
+      const supported = SUPPORTED_SUPPLIERS.has(normalized);
+      console.log(`   - ${supplierName}: ${count} mapping(s) ${supported ? '✅' : '⚠️ unsupported checker'}`);
+    });
+
     const results = {
       checked: 0,
       updated: 0,
-      failed: 0
+      failed: 0,
+      skipped: 0
     };
 
     for (const mapping of mappings) {
@@ -252,12 +280,19 @@ class PriceChecker {
       let priceData = { price: null, inStock: false };
       
       // Route to appropriate supplier checker
-      if (mapping.suppliers.name === 'Teststripz') {
+      const supplierName = mapping.suppliers?.name || '';
+      const normalizedSupplierName = supplierName.toLowerCase();
+
+      if (normalizedSupplierName === 'teststripz') {
         priceData = await this.checkTeststripz(mapping.products, mapping.supplier_sku);
-      } else if (mapping.suppliers.name === 'RapidRx USA') {
+      } else if (normalizedSupplierName === 'rapidrx usa') {
         priceData = await this.checkRapidRx(mapping.products, mapping.supplier_sku);
-      } else if (mapping.suppliers.name === 'Diabetic Warehouse') {
+      } else if (normalizedSupplierName === 'diabetic warehouse') {
         priceData = await this.checkDiabeticWarehouse(mapping.products, mapping.supplier_sku);
+      } else {
+        console.warn(`   ⚠️  No checker implemented for supplier: ${supplierName}. Skipping.`);
+        results.skipped++;
+        continue;
       }
       
       results.checked++;
@@ -284,6 +319,7 @@ class PriceChecker {
     console.log(`✅ Checked: ${results.checked}`);
     console.log(`💾 Updated: ${results.updated}`);
     console.log(`❌ Failed: ${results.failed}`);
+    console.log(`⏭️  Skipped: ${results.skipped}`);
     console.log('='.repeat(50));
   }
 }

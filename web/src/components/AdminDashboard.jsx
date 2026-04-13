@@ -62,7 +62,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     zip_code: '',
     phone: ''
   })
-  const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', insurance: '', birthday: '', address_line1: '', city: '', state: '', zip_code: '', shipping_duration: '' })
+  const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', insurance: '', birthday: '', address_line1: '', city: '', state: '', zip_code: '', shipping_duration: '', payment_status: '' })
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState(null)
   const [productNeeded, setProductNeeded] = useState('')
@@ -128,12 +128,10 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const [assignProductForm, setAssignProductForm] = useState({
     product_id: '',
     quantity: 1,
-    next_ship_date: new Date().toISOString().split('T')[0]
+    next_ship_date: new Date().toISOString().split('T')[0],
+    frequency_days: 30
   })
   const [shippingScheduleItems, setShippingScheduleItems] = useState([])
-  const [showShippingModal, setShowShippingModal] = useState(false)
-  const [shippingClient, setShippingClient] = useState(null)
-  const [nextShipDateInput, setNextShipDateInput] = useState('')
 
   // Projects & Tasks State
   const [projects, setProjects] = useState([])
@@ -176,6 +174,144 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     return `${year}-${month}-${day}`
   }
 
+  const calculateAutoNextShipDate = (shipmentItem) => {
+    const configuredFrequency = Number(shipmentItem?.frequency_days)
+    const quantity = Math.max(1, Number(shipmentItem?.quantity) || 1)
+    const productCategory = (shipmentItem?.products?.category || shipmentItem?.category || '').toLowerCase()
+    const productName = (shipmentItem?.products?.name || shipmentItem?.product_name || '').toLowerCase()
+
+    let baseDays = Number.isFinite(configuredFrequency) && configuredFrequency > 0 ? configuredFrequency : 30
+
+    if ((!Number.isFinite(configuredFrequency) || configuredFrequency <= 0) && (productCategory === 'tubing' || productName.includes('tubing'))) {
+      baseDays = 90
+    }
+
+    const bufferDays = quantity >= 3 ? 2 : 1
+    const nextDate = new Date()
+    nextDate.setHours(0, 0, 0, 0)
+    nextDate.setDate(nextDate.getDate() + baseDays + bufferDays)
+    return nextDate.toISOString().split('T')[0]
+  }
+
+  const getSupplierForProduct = async (productId) => {
+    if (!productId) return null
+
+    const { data, error } = await supabase
+      .from('product_suppliers')
+      .select(`
+        supplier_id,
+        price,
+        is_preferred,
+        in_stock,
+        suppliers (
+          id,
+          active
+        )
+      `)
+      .eq('product_id', productId)
+      .eq('in_stock', true)
+
+    if (error) throw error
+
+    const activeSuppliers = (data || []).filter(item => item.suppliers?.active !== false)
+    const candidates = activeSuppliers.length > 0 ? activeSuppliers : (data || [])
+    if (candidates.length === 0) return null
+
+    candidates.sort((first, second) => {
+      if (Boolean(first.is_preferred) !== Boolean(second.is_preferred)) {
+        return first.is_preferred ? -1 : 1
+      }
+
+      const firstPrice = Number(first.price)
+      const secondPrice = Number(second.price)
+      const firstValue = Number.isFinite(firstPrice) ? firstPrice : Number.POSITIVE_INFINITY
+      const secondValue = Number.isFinite(secondPrice) ? secondPrice : Number.POSITIVE_INFINITY
+      return firstValue - secondValue
+    })
+
+    return candidates[0]
+  }
+
+  const queueNextShipmentOrder = async (shipmentItem, nextShipDate) => {
+    const supplierChoice = await getSupplierForProduct(shipmentItem.product_id)
+
+    const { data: existingOrders, error: existingOrdersError } = await supabase
+      .from('pending_orders')
+      .select('id, preferred_supplier_id')
+      .eq('lead_id', shipmentItem.lead_id)
+      .eq('ship_date', nextShipDate)
+      .in('status', ['pending', 'reviewed', 'ordered'])
+      .order('created_at', { ascending: true })
+      .limit(1)
+
+    if (existingOrdersError) throw existingOrdersError
+
+    let pendingOrderId = existingOrders?.[0]?.id
+
+    if (!pendingOrderId) {
+      const orderDetails = {
+        auto_generated: true,
+        generated_from: 'calendar_mark_shipped',
+        client_product_id: shipmentItem.id,
+        items: [
+          {
+            product_id: shipmentItem.product_id,
+            quantity: shipmentItem.quantity
+          }
+        ]
+      }
+
+      const { data: insertedOrder, error: insertOrderError } = await supabase
+        .from('pending_orders')
+        .insert([
+          {
+            lead_id: shipmentItem.lead_id,
+            ship_date: nextShipDate,
+            status: 'pending',
+            preferred_supplier_id: supplierChoice?.supplier_id || null,
+            order_details: orderDetails
+          }
+        ])
+        .select('id')
+        .single()
+
+      if (insertOrderError) throw insertOrderError
+      pendingOrderId = insertedOrder.id
+    } else if (!existingOrders[0].preferred_supplier_id && supplierChoice?.supplier_id) {
+      const { error: updateOrderError } = await supabase
+        .from('pending_orders')
+        .update({ preferred_supplier_id: supplierChoice.supplier_id })
+        .eq('id', pendingOrderId)
+
+      if (updateOrderError) throw updateOrderError
+    }
+
+    const { data: existingItems, error: existingItemsError } = await supabase
+      .from('pending_order_items')
+      .select('id')
+      .eq('pending_order_id', pendingOrderId)
+      .eq('product_id', shipmentItem.product_id)
+      .limit(1)
+
+    if (existingItemsError) throw existingItemsError
+
+    if (!existingItems || existingItems.length === 0) {
+      const { error: insertItemError } = await supabase
+        .from('pending_order_items')
+        .insert([
+          {
+            pending_order_id: pendingOrderId,
+            product_id: shipmentItem.product_id,
+            quantity: shipmentItem.quantity,
+            supplier_id: supplierChoice?.supplier_id || null,
+            price: supplierChoice?.price || null
+          }
+        ])
+
+      if (insertItemError) throw insertItemError
+    }
+  }
+
   const sortTasksByDueDate = (firstTask, secondTask) => {
     if (!firstTask.due_date && !secondTask.due_date) {
       return new Date(secondTask.created_at || 0) - new Date(firstTask.created_at || 0)
@@ -199,6 +335,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     fetchSuppliers()
     fetchAllClientProducts()
     fetchShippingSchedule()
+    fetchPendingOrders()
     fetchProjects()
     fetchTasks()
     fetchExpenses()
@@ -595,6 +732,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
           lead_id,
           product_id,
           quantity,
+          frequency_days,
           next_ship_date,
           active,
           products (
@@ -657,13 +795,58 @@ export default function AdminDashboard({ userEmail, onLogout }) {
             )
           )
         `)
-        .in('status', ['pending', 'reviewed'])
+        .in('status', ['pending', 'reviewed', 'ordered'])
         .order('ship_date', { ascending: true })
 
       if (error) throw error
       setPendingOrders(data || [])
     } catch (error) {
       console.error('Error fetching pending orders:', error)
+    }
+  }
+
+  const updatePendingOrderStatus = async (order, nextStatus) => {
+    if (!supabase || !order?.id) return
+
+    if (nextStatus === 'cancelled' && !confirm(`Cancel order for ${order.leads?.name || 'this client'}?`)) {
+      return
+    }
+
+    let trackingNumber = order.tracking_number || null
+    if (nextStatus === 'shipped') {
+      const enteredTracking = window.prompt('Enter tracking number (optional):', order.tracking_number || '')
+      if (enteredTracking === null) return
+      trackingNumber = enteredTracking.trim() || null
+    }
+
+    const nowIso = new Date().toISOString()
+    const updates = { status: nextStatus }
+
+    if (nextStatus === 'ordered') {
+      updates.order_placed_at = order.order_placed_at || nowIso
+    }
+
+    if (nextStatus === 'shipped') {
+      updates.shipped_at = nowIso
+      updates.tracking_number = trackingNumber
+    }
+
+    setUpdating(true)
+    try {
+      const { error } = await supabase
+        .from('pending_orders')
+        .update(updates)
+        .eq('id', order.id)
+
+      if (error) throw error
+
+      await fetchPendingOrders()
+      alert(`Order updated to ${nextStatus}.`)
+    } catch (error) {
+      console.error('Error updating pending order status:', error)
+      alert('Failed to update order: ' + error.message)
+    } finally {
+      setUpdating(false)
     }
   }
 
@@ -985,34 +1168,31 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     }
   }
 
-  const handleMarkShipped = async () => {
-    if (!supabase || !shippingClient) return
-    if (!nextShipDateInput) {
-      alert('Please select the next shipping date')
-      return
-    }
+  const handleMarkShipped = async (shipmentItem) => {
+    if (!supabase || !shipmentItem) return
+
+    const nextShipDate = calculateAutoNextShipDate(shipmentItem)
 
     setUpdating(true)
     try {
+      await queueNextShipmentOrder(shipmentItem, nextShipDate)
+
       const { error } = await supabase
         .from('client_products')
         .update({
-          next_ship_date: nextShipDateInput
+          next_ship_date: nextShipDate
         })
-        .eq('id', shippingClient.id)
+        .eq('id', shipmentItem.id)
 
       if (error) throw error
 
-      if (selectedClient?.id === shippingClient.lead_id) {
+      if (selectedClient?.id === shipmentItem.lead_id) {
         await fetchClientProducts(selectedClient.id)
       }
 
       await fetchShippingSchedule()
-      setShowShippingModal(false)
-      setShippingClient(null)
-      setNextShipDateInput('')
-
-      alert('Shipment marked. Next shipping date saved.')
+      await fetchPendingOrders()
+      alert(`Shipment marked. Next ${shipmentItem.product_name || 'product'} shipment scheduled for ${formatDate(nextShipDate)}.`)
     } catch (error) {
       console.error('Error marking shipment:', error)
       alert('Failed to mark shipment: ' + error.message)
@@ -1193,7 +1373,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
           city: editForm.city,
           state: editForm.state,
           zip_code: editForm.zip_code,
-          shipping_duration: editForm.shipping_duration || null
+          shipping_duration: editForm.shipping_duration || null,
+          payment_status: editForm.payment_status || null
         })
         .eq('id', selectedClient.id)
 
@@ -1233,7 +1414,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       city: selectedClient.city || '',
       state: selectedClient.state || '',
       zip_code: selectedClient.zip_code || '',
-      shipping_duration: selectedClient.shipping_duration || ''
+      shipping_duration: selectedClient.shipping_duration || '',
+      payment_status: selectedClient.payment_status || ''
     })
     setShowEditClientModal(true)
   }
@@ -1340,6 +1522,54 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       await fetchLeads()
     } catch (error) {
       console.error('Error marking physician order as received:', error)
+      alert('Failed to update status')
+    }
+  }
+
+  const handleMarkPhysicianOrderSentToInsurance = async () => {
+    if (!supabase || !selectedClient) return
+
+    try {
+      const sentToInsuranceAt = new Date().toISOString()
+
+      const { error } = await supabase
+        .from('leads')
+        .update({ physician_order_sent_to_insurance_at: sentToInsuranceAt })
+        .eq('id', selectedClient.id)
+
+      if (error) throw error
+
+      setSelectedClient({
+        ...selectedClient,
+        physician_order_sent_to_insurance_at: sentToInsuranceAt
+      })
+      await fetchLeads()
+    } catch (error) {
+      console.error('Error marking physician order as sent to insurance:', error)
+      alert('Failed to update status')
+    }
+  }
+
+  const handleMarkPhysicianOrderInsuranceReceived = async () => {
+    if (!supabase || !selectedClient) return
+
+    try {
+      const insuranceReceivedAt = new Date().toISOString()
+
+      const { error } = await supabase
+        .from('leads')
+        .update({ physician_order_insurance_received_at: insuranceReceivedAt })
+        .eq('id', selectedClient.id)
+
+      if (error) throw error
+
+      setSelectedClient({
+        ...selectedClient,
+        physician_order_insurance_received_at: insuranceReceivedAt
+      })
+      await fetchLeads()
+    } catch (error) {
+      console.error('Error marking insurance receipt for physician order:', error)
       alert('Failed to update status')
     }
   }
@@ -2554,6 +2784,74 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                                 )}
                               </div>
                             </div>
+
+                            {/* Sent to Insurance */}
+                            <div className="flex items-center gap-3">
+                              <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center ${
+                                selectedClient.physician_order_sent_to_insurance_at
+                                  ? 'bg-green-500'
+                                  : 'bg-gray-300'
+                              }`}>
+                                {selectedClient.physician_order_sent_to_insurance_at ? (
+                                  <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
+                                  </svg>
+                                ) : (
+                                  <div className="w-2 h-2 bg-white rounded-full"></div>
+                                )}
+                              </div>
+                              <div className="flex-1">
+                                <div className="font-medium text-gray-900">Physician Order Sent to Insurance</div>
+                                {selectedClient.physician_order_sent_to_insurance_at ? (
+                                  <div className="text-sm text-gray-600">
+                                    {formatDate(selectedClient.physician_order_sent_to_insurance_at)}
+                                  </div>
+                                ) : selectedClient.physician_order_received_at ? (
+                                  <button
+                                    onClick={handleMarkPhysicianOrderSentToInsurance}
+                                    className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                                  >
+                                    Mark as Sent to Insurance
+                                  </button>
+                                ) : (
+                                  <div className="text-sm text-gray-500">Receive signed order first</div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Insurance Received */}
+                            <div className="flex items-center gap-3">
+                              <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center ${
+                                selectedClient.physician_order_insurance_received_at
+                                  ? 'bg-green-500'
+                                  : 'bg-gray-300'
+                              }`}>
+                                {selectedClient.physician_order_insurance_received_at ? (
+                                  <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
+                                  </svg>
+                                ) : (
+                                  <div className="w-2 h-2 bg-white rounded-full"></div>
+                                )}
+                              </div>
+                              <div className="flex-1">
+                                <div className="font-medium text-gray-900">Insurance Received Physician Order</div>
+                                {selectedClient.physician_order_insurance_received_at ? (
+                                  <div className="text-sm text-gray-600">
+                                    {formatDate(selectedClient.physician_order_insurance_received_at)}
+                                  </div>
+                                ) : selectedClient.physician_order_sent_to_insurance_at ? (
+                                  <button
+                                    onClick={handleMarkPhysicianOrderInsuranceReceived}
+                                    className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                                  >
+                                    Mark as Insurance Received
+                                  </button>
+                                ) : (
+                                  <div className="text-sm text-gray-500">Send to insurance first</div>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         </div>
                       )}
@@ -2681,11 +2979,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                         <div className="text-xs text-gray-600 mt-1">{item.product_name}</div>
                         <div className="text-xs text-gray-600">Qty: {item.quantity}</div>
                         <button
-                          onClick={() => {
-                            setShippingClient(item)
-                            setNextShipDateInput('')
-                            setShowShippingModal(true)
-                          }}
+                          onClick={() => handleMarkShipped(item)}
+                          disabled={updating}
                           className="mt-2 w-full px-2 py-1 bg-green-600 hover:bg-green-700 text-white rounded text-xs font-medium"
                         >
                           ✓ Mark Shipped
@@ -4245,17 +4540,96 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                                   <div className="text-sm text-gray-600">{item.product_name} × {item.quantity}</div>
                                 </div>
                                 <button
-                                  onClick={() => {
-                                    setShippingClient(item)
-                                    setNextShipDateInput('')
-                                    setShowShippingModal(true)
-                                  }}
+                                  onClick={() => handleMarkShipped(item)}
+                                  disabled={updating}
                                   className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md text-sm font-medium"
                                 >
                                   ✓ Mark Shipped
                                 </button>
                               </div>
                             ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="mt-4 border border-gray-200 rounded-lg overflow-hidden">
+                        <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+                          <h3 className="font-semibold text-gray-900">Pending Orders Queue</h3>
+                          <span className="text-xs text-gray-600">{pendingOrders.length} active</span>
+                        </div>
+                        {pendingOrders.length === 0 ? (
+                          <div className="px-4 py-6 text-sm text-gray-500">No pending orders in queue.</div>
+                        ) : (
+                          <div className="divide-y divide-gray-100">
+                            {pendingOrders.map(order => {
+                              const statusClasses = order.status === 'pending'
+                                ? 'bg-yellow-100 text-yellow-800'
+                                : order.status === 'reviewed'
+                                  ? 'bg-blue-100 text-blue-800'
+                                  : 'bg-purple-100 text-purple-800'
+
+                              return (
+                                <div key={order.id} className="px-4 py-3">
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                      <div className="font-medium text-gray-900">{order.leads?.name || 'Unknown Client'}</div>
+                                      <div className="text-sm text-gray-600">Ship Date: {formatDate(order.ship_date)}</div>
+                                      <div className="text-xs text-gray-500 mt-1">
+                                        {(order.pending_order_items || []).map(item => `${item.products?.name || 'Item'} × ${item.quantity}`).join(' • ') || 'No items'}
+                                      </div>
+                                      {order.tracking_number && (
+                                        <div className="text-xs text-green-700 mt-1">Tracking: {order.tracking_number}</div>
+                                      )}
+                                    </div>
+                                    <span className={`px-2 py-1 rounded-full text-xs font-semibold uppercase ${statusClasses}`}>
+                                      {order.status}
+                                    </span>
+                                  </div>
+
+                                  <div className="mt-3 flex flex-wrap gap-2">
+                                    {order.status === 'pending' && (
+                                      <button
+                                        onClick={() => updatePendingOrderStatus(order, 'reviewed')}
+                                        disabled={updating}
+                                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white rounded text-xs font-medium"
+                                      >
+                                        Review
+                                      </button>
+                                    )}
+
+                                    {order.status === 'reviewed' && (
+                                      <button
+                                        onClick={() => updatePendingOrderStatus(order, 'ordered')}
+                                        disabled={updating}
+                                        className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white rounded text-xs font-medium"
+                                      >
+                                        Mark Ordered
+                                      </button>
+                                    )}
+
+                                    {order.status === 'ordered' && (
+                                      <button
+                                        onClick={() => updatePendingOrderStatus(order, 'shipped')}
+                                        disabled={updating}
+                                        className="px-3 py-1.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white rounded text-xs font-medium"
+                                      >
+                                        Mark Shipped
+                                      </button>
+                                    )}
+
+                                    {order.status !== 'cancelled' && order.status !== 'shipped' && (
+                                      <button
+                                        onClick={() => updatePendingOrderStatus(order, 'cancelled')}
+                                        disabled={updating}
+                                        className="px-3 py-1.5 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white rounded text-xs font-medium"
+                                      >
+                                        Cancel
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              )
+                            })}
                           </div>
                         )}
                       </div>
@@ -4870,6 +5244,21 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Payment Status
+                </label>
+                <select
+                  value={editForm.payment_status}
+                  onChange={(e) => setEditForm({ ...editForm, payment_status: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Select payment status</option>
+                  <option value="paying">Paying</option>
+                  <option value="partially_paying">Partially Paying</option>
+                  <option value="not_paying_yet">Not Paying Yet</option>
+                </select>
+              </div>
 
               <div className="border-t pt-4">
                 <h4 className="text-sm font-semibold text-gray-700 mb-3">Patient Address</h4>
@@ -5107,51 +5496,6 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         </div>
       )}
 
-      {/* Mark Shipped Modal - Select Next Ship Date */}
-      {showShippingModal && shippingClient && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md shadow-xl">
-            <h3 className="text-xl font-bold text-gray-900 mb-2">Mark as Shipped</h3>
-            <p className="text-sm text-gray-600 mb-6">
-              <span className="font-semibold">{shippingClient.product_name}</span> for <span className="font-semibold">{shippingClient.client_name}</span>
-            </p>
-            <form onSubmit={(e) => { e.preventDefault(); handleMarkShipped(); }} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Next Shipping Date *</label>
-                <input
-                  type="date"
-                  value={nextShipDateInput}
-                  onChange={(e) => setNextShipDateInput(e.target.value)}
-                  required
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              <div className="flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowShippingModal(false)
-                    setShippingClient(null)
-                    setNextShipDateInput('')
-                  }}
-                  disabled={updating}
-                  className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:bg-gray-100"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={updating || !nextShipDateInput}
-                  className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white rounded-lg font-medium"
-                >
-                  {updating ? 'Saving...' : 'Confirm Shipped'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       {/* Add Product Modal */}
       {showAddProductModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -5378,13 +5722,14 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                     lead_id: assignProductClient.id,
                     product_id: assignProductForm.product_id,
                     quantity: parseInt(assignProductForm.quantity),
+                    frequency_days: parseInt(assignProductForm.frequency_days) || 30,
                     next_ship_date: assignProductForm.next_ship_date
                   }])
                 if (error) throw error
                 await fetchClientProducts(assignProductClient.id)
                 await fetchShippingSchedule()
                 setShowAssignProductModal(false)
-                setAssignProductForm({ product_id: '', quantity: 1, next_ship_date: new Date().toISOString().split('T')[0] })
+                setAssignProductForm({ product_id: '', quantity: 1, next_ship_date: new Date().toISOString().split('T')[0], frequency_days: 30 })
                 alert('Product assigned successfully!')
               } catch (error) {
                 console.error('Error assigning product:', error)
@@ -5434,7 +5779,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   onClick={() => {
                     setShowAssignProductModal(false)
                     setAssignProductClient(null)
-                    setAssignProductForm({ product_id: '', quantity: 1, next_ship_date: new Date().toISOString().split('T')[0] })
+                    setAssignProductForm({ product_id: '', quantity: 1, next_ship_date: new Date().toISOString().split('T')[0], frequency_days: 30 })
                   }}
                   className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
                 >
@@ -5510,6 +5855,17 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   type="date"
                   value={projectForm.deadline}
                   onChange={(e) => setProjectForm({ ...projectForm, deadline: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Days Between Shipments *</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={assignProductForm.frequency_days}
+                  onChange={(e) => setAssignProductForm({ ...assignProductForm, frequency_days: e.target.value })}
+                  required
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
