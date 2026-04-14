@@ -15,6 +15,7 @@ CREATE TABLE leads (
   stage TEXT DEFAULT 'new' CHECK (stage IN ('new', 'called', 'reached', 'unqualified', 'qualified')),
   qualified_at TIMESTAMP WITH TIME ZONE,
   product_needed TEXT,
+  is_paused BOOLEAN DEFAULT false,
   date_shipped DATE,
   shipping_duration TEXT CHECK (shipping_duration IN ('1_month', '3_month')),
   address_line1 TEXT,

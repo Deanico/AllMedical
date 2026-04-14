@@ -62,7 +62,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     zip_code: '',
     phone: ''
   })
-  const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', insurance: '', birthday: '', address_line1: '', city: '', state: '', zip_code: '', shipping_duration: '', payment_status: '' })
+  const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', insurance: '', birthday: '', address_line1: '', city: '', state: '', zip_code: '', shipping_duration: '', payment_status: '', is_paused: false })
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState(null)
   const [productNeeded, setProductNeeded] = useState('')
@@ -77,6 +77,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const [clientSearchQuery, setClientSearchQuery] = useState('')
   const [insuranceFilter, setInsuranceFilter] = useState('')
   const [productFilter, setProductFilter] = useState('')
+  const [clientStatusFilter, setClientStatusFilter] = useState('active')
   const [showAddLeadModal, setShowAddLeadModal] = useState(false)
   const [addLeadForm, setAddLeadForm] = useState({ 
     name: '', 
@@ -87,7 +88,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     address_line1: '', 
     city: '', 
     state: '', 
-    zip_code: '' 
+    zip_code: '',
+    is_paused: false 
   })
   const [selectedCalcClient, setSelectedCalcClient] = useState(null)
   const [editingCalculator, setEditingCalculator] = useState(false)
@@ -1136,6 +1138,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
           city: addLeadForm.city || null,
           state: addLeadForm.state || null,
           zip_code: addLeadForm.zip_code || null,
+          is_paused: Boolean(addLeadForm.is_paused),
           stage: 'new'
         }])
         .select()
@@ -1155,7 +1158,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         address_line1: '', 
         city: '', 
         state: '', 
-        zip_code: '' 
+        zip_code: '',
+        is_paused: false 
       })
       setShowAddLeadModal(false)
       
@@ -1360,22 +1364,27 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     try {
       // Format birthday to include time at noon UTC to prevent timezone shift issues
       const birthdayValue = editForm.birthday ? `${editForm.birthday}T12:00:00` : null;
+      const updatePayload = {
+        name: editForm.name,
+        email: editForm.email,
+        phone: editForm.phone,
+        insurance: editForm.insurance,
+        birthday: birthdayValue,
+        address_line1: editForm.address_line1,
+        city: editForm.city,
+        state: editForm.state,
+        zip_code: editForm.zip_code,
+        shipping_duration: editForm.shipping_duration || null,
+        is_paused: Boolean(editForm.is_paused)
+      }
+
+      if (editForm.payment_status) {
+        updatePayload.payment_status = editForm.payment_status
+      }
       
       const { error } = await supabase
         .from('leads')
-        .update({
-          name: editForm.name,
-          email: editForm.email,
-          phone: editForm.phone,
-          insurance: editForm.insurance,
-          birthday: birthdayValue,
-          address_line1: editForm.address_line1,
-          city: editForm.city,
-          state: editForm.state,
-          zip_code: editForm.zip_code,
-          shipping_duration: editForm.shipping_duration || null,
-          payment_status: editForm.payment_status || null
-        })
+        .update(updatePayload)
         .eq('id', selectedClient.id)
 
       if (error) throw error
@@ -1385,7 +1394,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       setSelectedClient({ ...selectedClient, ...editForm })
     } catch (error) {
       console.error('Error updating client:', error)
-      alert('Failed to update client')
+      alert('Failed to update client: ' + (error?.message || 'Unknown error'))
     }
   }
 
@@ -1415,7 +1424,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       state: selectedClient.state || '',
       zip_code: selectedClient.zip_code || '',
       shipping_duration: selectedClient.shipping_duration || '',
-      payment_status: selectedClient.payment_status || ''
+      payment_status: selectedClient.payment_status || '',
+      is_paused: Boolean(selectedClient.is_paused)
     })
     setShowEditClientModal(true)
   }
@@ -1632,6 +1642,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
   const allLeads = activeTab === 'leads' ? filteredLeads : leads // Show filtered leads in Leads tab
   const qualifiedLeads = leads.filter(lead => lead.stage === 'qualified')
+  const activeQualifiedLeads = qualifiedLeads.filter(lead => !lead.is_paused)
   const todayDateString = getLocalTodayDateString()
   const todayTasks = tasks
     .filter(task => task.due_date === todayDateString)
@@ -1654,7 +1665,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const navigation = [
     { id: 'dashboard', name: 'Dashboard', icon: '📊' },
     { id: 'leads', name: 'Leads', icon: '👤', badge: leads.length },
-    { id: 'clients', name: 'Clients', icon: '👥', badge: qualifiedLeads.length },
+    { id: 'clients', name: 'Clients', icon: '👥', badge: activeQualifiedLeads.length },
     { id: 'shipping', name: 'Shipping', icon: '📦' },
     { id: 'products', name: 'Products', icon: '🏷️' },
     { id: 'calendar', name: 'Calendar', icon: '📅' },
@@ -1785,7 +1796,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm font-medium text-gray-600">Active Clients</p>
-                      <p className="text-3xl font-bold text-gray-900 mt-2">{qualifiedLeads.length}</p>
+                      <p className="text-3xl font-bold text-gray-900 mt-2">{activeQualifiedLeads.length}</p>
                     </div>
                     <div className="bg-green-100 rounded-full p-3">
                       <span className="text-2xl">👥</span>
@@ -1803,7 +1814,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                       <p className="text-sm font-medium text-gray-600">Monthly Revenue</p>
                       <p className="text-3xl font-bold text-gray-900 mt-2">
                         ${(() => {
-                          const totalYearlyNetProfit = qualifiedLeads.reduce((total, client) => {
+                          const totalYearlyNetProfit = activeQualifiedLeads.reduce((total, client) => {
                             if (!client.calc_deductible || !client.calc_insurance_paid || !client.calc_percent_allowable || !client.calc_product_cost) {
                               return total
                             }
@@ -2146,6 +2157,9 @@ export default function AdminDashboard({ userEmail, onLogout }) {
             <div className={`bg-white rounded-lg shadow ${showMobileDetails ? 'hidden md:block' : 'block'}`}>
               <div className="p-3 sm:p-4 border-b border-gray-200">
                 <h2 className="text-base sm:text-lg font-semibold text-gray-900 mb-3">Client List</h2>
+                <p className="text-xs text-gray-600 mb-3">
+                  Full Clients: {qualifiedLeads.length} • Active Clients: {activeQualifiedLeads.length}
+                </p>
                 
                 {/* Search and Filters */}
                 <div className="space-y-2">
@@ -2158,12 +2172,24 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   />
                   <div className="flex gap-2">
                     <select
+                      value={clientStatusFilter}
+                      onChange={(e) => {
+                        setClientStatusFilter(e.target.value)
+                        setInsuranceFilter('')
+                      }}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    >
+                      <option value="active">Active Clients</option>
+                      <option value="all">All Clients</option>
+                      <option value="paused">Paused Clients</option>
+                    </select>
+                    <select
                       value={insuranceFilter}
                       onChange={(e) => setInsuranceFilter(e.target.value)}
                       className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                     >
                       <option value="">All Insurance</option>
-                      {[...new Set(qualifiedLeads.map(c => c.insurance).filter(Boolean))].sort().map(insurance => (
+                      {[...new Set((clientStatusFilter === 'paused' ? qualifiedLeads.filter(c => c.is_paused) : activeQualifiedLeads).map(c => c.insurance).filter(Boolean))].sort().map(insurance => (
                         <option key={insurance} value={insurance}>{insurance}</option>
                       ))}
                     </select>
@@ -2185,6 +2211,13 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                 {(() => {
                   // Apply filters
                   let filtered = qualifiedLeads;
+
+                  // Active/paused filter
+                  if (clientStatusFilter === 'active') {
+                    filtered = filtered.filter(client => !client.is_paused)
+                  } else if (clientStatusFilter === 'paused') {
+                    filtered = filtered.filter(client => client.is_paused)
+                  }
                   
                   // Search filter
                   if (clientSearchQuery) {
@@ -2227,6 +2260,11 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                     >
                       <div className="font-semibold text-gray-900 text-sm sm:text-base">
                         {client.name}
+                        {client.is_paused && (
+                          <span className="ml-2 inline-block px-2 py-0.5 text-xs rounded-full bg-yellow-100 text-yellow-800 font-medium">
+                            Paused
+                          </span>
+                        )}
                         {(!client.address_line1 || !client.birthday) && (
                           <span className="ml-2 text-red-600 text-xs sm:text-sm font-medium block sm:inline mt-1 sm:mt-0">
                             {!client.address_line1 && !client.birthday ? 'Address & DOB Needed!' : 
@@ -2273,9 +2311,16 @@ export default function AdminDashboard({ userEmail, onLogout }) {
               {selectedClient ? (
                 <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-h-[calc(100vh-200px)] overflow-y-auto">
                   <div className="flex items-center justify-between flex-wrap gap-2">
-                    <h3 className="text-lg sm:text-xl font-bold text-gray-900">
-                      {selectedClient.name}
-                    </h3>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-lg sm:text-xl font-bold text-gray-900">
+                        {selectedClient.name}
+                      </h3>
+                      {selectedClient.is_paused && (
+                        <span className="px-2 py-0.5 text-xs rounded-full bg-yellow-100 text-yellow-800 font-medium">
+                          Paused Client
+                        </span>
+                      )}
+                    </div>
                     <button
                       onClick={openEditModal}
                       className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm"
@@ -5084,6 +5129,17 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
+              <div>
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={addLeadForm.is_paused}
+                    onChange={(e) => setAddLeadForm({ ...addLeadForm, is_paused: e.target.checked })}
+                    className="h-4 w-4"
+                  />
+                  Paused Client
+                </label>
+              </div>
               
               <div className="border-t pt-4">
                 <h4 className="text-sm font-semibold text-gray-700 mb-3">Address (Optional)</h4>
@@ -5159,7 +5215,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                       address_line1: '', 
                       city: '', 
                       state: '', 
-                      zip_code: '' 
+                      zip_code: '',
+                      is_paused: false 
                     })
                   }}
                   className="px-4 py-2 text-gray-700 bg-gray-200 hover:bg-gray-300 rounded-md"
@@ -5258,6 +5315,17 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   <option value="partially_paying">Partially Paying</option>
                   <option value="not_paying_yet">Not Paying Yet</option>
                 </select>
+              </div>
+              <div>
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={editForm.is_paused}
+                    onChange={(e) => setEditForm({ ...editForm, is_paused: e.target.checked })}
+                    className="h-4 w-4"
+                  />
+                  Paused Client
+                </label>
               </div>
 
               <div className="border-t pt-4">
