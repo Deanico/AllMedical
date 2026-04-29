@@ -176,23 +176,12 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     return `${year}-${month}-${day}`
   }
 
-  const calculateAutoNextShipDate = (shipmentItem) => {
-    const configuredFrequency = Number(shipmentItem?.frequency_days)
-    const quantity = Math.max(1, Number(shipmentItem?.quantity) || 1)
-    const productCategory = (shipmentItem?.products?.category || shipmentItem?.category || '').toLowerCase()
-    const productName = (shipmentItem?.products?.name || shipmentItem?.product_name || '').toLowerCase()
-
-    let baseDays = Number.isFinite(configuredFrequency) && configuredFrequency > 0 ? configuredFrequency : 30
-
-    if ((!Number.isFinite(configuredFrequency) || configuredFrequency <= 0) && (productCategory === 'tubing' || productName.includes('tubing'))) {
-      baseDays = 90
-    }
-
-    const bufferDays = quantity >= 3 ? 2 : 1
-    const nextDate = new Date()
-    nextDate.setHours(0, 0, 0, 0)
-    nextDate.setDate(nextDate.getDate() + baseDays + bufferDays)
-    return nextDate.toISOString().split('T')[0]
+  // Formula: next_ship_date = last_ship_date + 90 days − 2-day shipping buffer = +88 days
+  const calculateAutoNextShipDate = (fromDateStr) => {
+    const base = fromDateStr ? new Date(`${fromDateStr}T00:00:00`) : new Date()
+    base.setHours(0, 0, 0, 0)
+    base.setDate(base.getDate() + 88)
+    return base.toISOString().split('T')[0]
   }
 
   const getSupplierForProduct = async (productId) => {
@@ -1175,7 +1164,9 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const handleMarkShipped = async (shipmentItem) => {
     if (!supabase || !shipmentItem) return
 
-    const nextShipDate = calculateAutoNextShipDate(shipmentItem)
+    const today = getLocalTodayDateString()
+    // next_ship_date = last_ship_date + 90 days − 2-day shipping buffer
+    const nextShipDate = calculateAutoNextShipDate(today)
 
     setUpdating(true)
     try {
@@ -1184,6 +1175,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       const { error } = await supabase
         .from('client_products')
         .update({
+          last_ship_date: today,
           next_ship_date: nextShipDate
         })
         .eq('id', shipmentItem.id)
@@ -1196,7 +1188,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
       await fetchShippingSchedule()
       await fetchPendingOrders()
-      alert(`Shipment marked. Next ${shipmentItem.product_name || 'product'} shipment scheduled for ${formatDate(nextShipDate)}.`)
+      alert(`Shipped! Next ${shipmentItem.product_name || 'product'} order scheduled for ${formatDate(nextShipDate)}.`)
     } catch (error) {
       console.error('Error marking shipment:', error)
       alert('Failed to mark shipment: ' + error.message)

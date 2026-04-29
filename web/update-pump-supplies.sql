@@ -8,6 +8,7 @@ DELETE FROM products WHERE name = 'Insulin Pump Tubing';
 
 -- Tandem Autosoft XC Infusion Sets
 INSERT INTO products (name, category, manufacturer, description, sku) VALUES
+  ('Tandem Autosoft XC Infusion Set 6mm 5"', 'infusion_set', 'Tandem', 'Autosoft XC infusion set, 6mm cannula, 5" tubing', 'ASX-6-5'),
   ('Autosoft XC 6mm 23"', 'infusion_set', 'Tandem', 'Autosoft XC infusion set, 6mm cannula, 23" tubing', 'ASX-6-23'),
   ('Autosoft XC 6mm 32"', 'infusion_set', 'Tandem', 'Autosoft XC infusion set, 6mm cannula, 32" tubing', 'ASX-6-32'),
   ('Autosoft XC 9mm 23"', 'infusion_set', 'Tandem', 'Autosoft XC infusion set, 9mm cannula, 23" tubing', 'ASX-9-23'),
@@ -60,6 +61,7 @@ INSERT INTO products (name, category, manufacturer, description, sku) VALUES
   ('Medtronic 1.8mL Reservoir', 'reservoir', 'Medtronic', 'Smaller 1.8mL insulin reservoir for Medtronic pumps', 'RES-1.8ML'),
 
 -- Tandem Reservoirs
+  ('Tandem Mobi Cartridge 2mL', 'reservoir', 'Tandem', 'Insulin cartridge for Tandem Mobi pump, 2mL capacity', 'MOBI-2ML'),
   ('Tandem t:slim X2 Cartridge 3mL', 'reservoir', 'Tandem', 'Insulin cartridge for t:slim X2 pump, 3mL capacity', 'TSLIM-3ML'),
 
 -- Other Common Supplies

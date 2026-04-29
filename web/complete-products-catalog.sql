@@ -29,6 +29,7 @@ INSERT INTO products (name, category, manufacturer, description, sku) VALUES
   ('Freestyle Libre 2 Reader', 'sensor', 'Abbott', 'Reader device for Libre 2 system', 'FL2-READER'),
 
 -- Tandem Autosoft XC Infusion Sets
+  ('Tandem Autosoft XC Infusion Set 6mm 5"', 'infusion_set', 'Tandem', 'Autosoft XC infusion set, 6mm cannula, 5" tubing', 'ASX-6-5'),
   ('Autosoft XC 6mm 23"', 'infusion_set', 'Tandem', 'Autosoft XC infusion set, 6mm cannula, 23" tubing', 'ASX-6-23'),
   ('Autosoft XC 6mm 32"', 'infusion_set', 'Tandem', 'Autosoft XC infusion set, 6mm cannula, 32" tubing', 'ASX-6-32'),
   ('Autosoft XC 9mm 23"', 'infusion_set', 'Tandem', 'Autosoft XC infusion set, 9mm cannula, 23" tubing', 'ASX-9-23'),
@@ -79,6 +80,7 @@ INSERT INTO products (name, category, manufacturer, description, sku) VALUES
 -- Reservoirs
   ('Medtronic 3mL Reservoir', 'reservoir', 'Medtronic', 'Standard 3mL insulin reservoir for Medtronic pumps', 'RES-3ML'),
   ('Medtronic 1.8mL Reservoir', 'reservoir', 'Medtronic', 'Smaller 1.8mL insulin reservoir for Medtronic pumps', 'RES-1.8ML'),
+  ('Tandem Mobi Cartridge 2mL', 'reservoir', 'Tandem', 'Insulin cartridge for Tandem Mobi pump, 2mL capacity', 'MOBI-2ML'),
   ('Tandem t:slim X2 Cartridge 3mL', 'reservoir', 'Tandem', 'Insulin cartridge for t:slim X2 pump, 3mL capacity', 'TSLIM-3ML'),
 
 -- Common Supplies
