@@ -38,6 +38,7 @@ const formatDisplayDate = (value) => {
 }
 
 export default function AdminDashboard({ userEmail, onLogout }) {
+  const queueStatuses = ['pending', 'reviewed', 'ready_to_order', 'ordered']
   const [activeView, setActiveView] = useState('dashboard')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [activeTab, setActiveTab] = useState('leads')
@@ -65,6 +66,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', insurance: '', birthday: '', address_line1: '', city: '', state: '', zip_code: '', shipping_duration: '', payment_status: '', is_paused: false })
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState(null)
+  const [queueSyncing, setQueueSyncing] = useState(false)
+  const [queueSyncResult, setQueueSyncResult] = useState(null)
   const [productNeeded, setProductNeeded] = useState('')
   const productNeededTimerRef = useRef(null)
   const [nppesSearch, setNppesSearch] = useState('')
@@ -228,10 +231,10 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
     const { data: existingOrders, error: existingOrdersError } = await supabase
       .from('pending_orders')
-      .select('id, preferred_supplier_id')
+      .select('id, preferred_supplier_id, client_product_id')
       .eq('lead_id', shipmentItem.lead_id)
       .eq('ship_date', nextShipDate)
-      .in('status', ['pending', 'reviewed', 'ordered'])
+      .in('status', queueStatuses)
       .order('created_at', { ascending: true })
       .limit(1)
 
@@ -254,6 +257,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         .insert([
           {
             lead_id: shipmentItem.lead_id,
+            client_product_id: shipmentItem.id,
             ship_date: nextShipDate,
             status: 'pending',
             preferred_supplier_id: supplierChoice?.supplier_id || null,
@@ -265,13 +269,26 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
       if (insertOrderError) throw insertOrderError
       pendingOrderId = insertedOrder.id
-    } else if (!existingOrders[0].preferred_supplier_id && supplierChoice?.supplier_id) {
-      const { error: updateOrderError } = await supabase
-        .from('pending_orders')
-        .update({ preferred_supplier_id: supplierChoice.supplier_id })
-        .eq('id', pendingOrderId)
+    } else {
+      const existingOrder = existingOrders[0]
 
-      if (updateOrderError) throw updateOrderError
+      if (!existingOrder.client_product_id) {
+        const { error: backfillClientProductError } = await supabase
+          .from('pending_orders')
+          .update({ client_product_id: shipmentItem.id })
+          .eq('id', existingOrder.id)
+
+        if (backfillClientProductError) throw backfillClientProductError
+      }
+
+      if (!existingOrder.preferred_supplier_id && supplierChoice?.supplier_id) {
+        const { error: updateOrderError } = await supabase
+          .from('pending_orders')
+          .update({ preferred_supplier_id: supplierChoice.supplier_id })
+          .eq('id', pendingOrderId)
+
+        if (updateOrderError) throw updateOrderError
+      }
     }
 
     const { data: existingItems, error: existingItemsError } = await supabase
@@ -300,6 +317,133 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     }
   }
 
+  const syncGeneratePendingOrders = async ({ showAlert = true } = {}) => {
+    if (!supabase) return
+
+    setQueueSyncing(true)
+    setQueueSyncResult(null)
+
+    try {
+      const { data: dueShipments, error: dueError } = await supabase
+        .from('shipment_due_view')
+        .select('client_product_id, lead_id, product_id, patient_full_name, product_name, ship_date')
+        .order('ship_date', { ascending: true })
+
+      if (dueError) throw dueError
+
+      const dueRows = dueShipments || []
+      if (dueRows.length === 0) {
+        const result = { scanned: 0, created: 0, skippedExisting: 0 }
+        setQueueSyncResult(result)
+        if (showAlert) {
+          alert('No due shipments found to seed into pending orders.')
+        }
+        return
+      }
+
+      const clientProductIds = [...new Set(dueRows.map(row => row.client_product_id).filter(Boolean))]
+      const shipDates = [...new Set(dueRows.map(row => row.ship_date).filter(Boolean))]
+
+      const [{ data: existingOrders, error: existingError }, { data: clientProducts, error: clientProductsError }] = await Promise.all([
+        supabase
+          .from('pending_orders')
+          .select('id, client_product_id, ship_date')
+          .in('client_product_id', clientProductIds)
+          .in('ship_date', shipDates),
+        supabase
+          .from('client_products')
+          .select('id, quantity')
+          .in('id', clientProductIds)
+      ])
+
+      if (existingError) throw existingError
+      if (clientProductsError) throw clientProductsError
+
+      const quantityByClientProductId = new Map((clientProducts || []).map(cp => [cp.id, cp.quantity || 1]))
+      const existingPairKeys = new Set(
+        (existingOrders || [])
+          .filter(order => order.client_product_id && order.ship_date)
+          .map(order => `${order.client_product_id}|${order.ship_date}`)
+      )
+
+      const toInsert = []
+      const dueByPairKey = new Map()
+      for (const due of dueRows) {
+        const pairKey = `${due.client_product_id}|${due.ship_date}`
+        dueByPairKey.set(pairKey, due)
+        if (existingPairKeys.has(pairKey)) continue
+
+        const quantity = quantityByClientProductId.get(due.client_product_id) || 1
+        toInsert.push({
+          lead_id: due.lead_id,
+          client_product_id: due.client_product_id,
+          ship_date: due.ship_date,
+          status: 'pending',
+          order_details: {
+            patient_name: due.patient_full_name || null,
+            product_name: due.product_name || null,
+            product_id: due.product_id || null,
+            quantity,
+            ship_date: due.ship_date,
+            auto_generated: true
+          }
+        })
+      }
+
+      let created = 0
+      if (toInsert.length > 0) {
+        const { data: insertedOrders, error: insertError } = await supabase
+          .from('pending_orders')
+          .insert(toInsert)
+          .select('id, client_product_id, ship_date')
+
+        if (insertError) throw insertError
+        created = (insertedOrders || []).length
+
+        const itemsToInsert = (insertedOrders || []).map(order => {
+          const pairKey = `${order.client_product_id}|${order.ship_date}`
+          const due = dueByPairKey.get(pairKey)
+          const quantity = quantityByClientProductId.get(order.client_product_id) || 1
+
+          return {
+            pending_order_id: order.id,
+            product_id: due?.product_id || null,
+            quantity
+          }
+        }).filter(item => item.product_id)
+
+        if (itemsToInsert.length > 0) {
+          const { error: itemsInsertError } = await supabase
+            .from('pending_order_items')
+            .insert(itemsToInsert)
+
+          if (itemsInsertError) throw itemsInsertError
+        }
+      }
+
+      const result = {
+        scanned: dueRows.length,
+        created,
+        skippedExisting: dueRows.length - created
+      }
+
+      setQueueSyncResult(result)
+      await fetchPendingOrders()
+
+      if (showAlert) {
+        alert(`Pending order sync complete. Created ${result.created}, skipped ${result.skippedExisting} existing due shipment(s).`)
+      }
+    } catch (error) {
+      console.error('Error syncing pending orders from due shipments:', error)
+      setQueueSyncResult({ error: error.message || 'Failed to sync pending orders.' })
+      if (showAlert) {
+        alert('Failed to sync pending orders: ' + (error.message || 'Unknown error'))
+      }
+    } finally {
+      setQueueSyncing(false)
+    }
+  }
+
   const sortTasksByDueDate = (firstTask, secondTask) => {
     if (!firstTask.due_date && !secondTask.due_date) {
       return new Date(secondTask.created_at || 0) - new Date(firstTask.created_at || 0)
@@ -324,6 +468,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     fetchAllClientProducts()
     fetchShippingSchedule()
     fetchPendingOrders()
+    syncGeneratePendingOrders({ showAlert: false })
     fetchProjects()
     fetchTasks()
     fetchExpenses()
@@ -783,7 +928,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
             )
           )
         `)
-        .in('status', ['pending', 'reviewed', 'ordered'])
+        .in('status', queueStatuses)
         .order('ship_date', { ascending: true })
 
       if (error) throw error
@@ -815,6 +960,17 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     }
 
     if (nextStatus === 'shipped') {
+      if (!order.client_product_id) {
+        const forceShip = window.confirm(
+          'This order is missing client_product_id, so the schedule cannot be updated automatically. Ship anyway without updating the calendar?'
+        )
+
+        if (!forceShip) {
+          setUpdating(false)
+          return
+        }
+      }
+
       updates.shipped_at = nowIso
       updates.tracking_number = trackingNumber
     }
@@ -1207,7 +1363,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
           .select('id, status')
           .eq('client_product_id', shipmentItem.id)
           .eq('ship_date', dueShipDate)
-          .in('status', ['pending', 'reviewed', 'ordered'])
+          .in('status', queueStatuses)
           .order('created_at', { ascending: true })
           .limit(1)
 
@@ -1736,6 +1892,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                 setShowMobileDetails(false)
                 if (item.id === 'shipping') {
                   fetchShippingSchedule()
+                  syncGeneratePendingOrders({ showAlert: false })
                 }
               }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors ${
@@ -1801,6 +1958,20 @@ export default function AdminDashboard({ userEmail, onLogout }) {
             ) : (
               <div className="bg-green-50 border-2 border-green-400 text-green-800 px-6 py-4 rounded-lg mb-4 text-lg font-semibold">
                 ✓ Successfully imported {syncResult.added} new leads from Google Sheets! ({syncResult.skipped} duplicates skipped)
+              </div>
+            )}
+          </div>
+        )}
+
+        {queueSyncResult && (
+          <div className="px-6 pt-4">
+            {queueSyncResult.error ? (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+                {queueSyncResult.error}
+              </div>
+            ) : (
+              <div className="bg-blue-50 border border-blue-200 text-blue-800 px-4 py-3 rounded mb-4 text-sm font-medium">
+                Pending order sync: scanned {queueSyncResult.scanned}, created {queueSyncResult.created}, skipped {queueSyncResult.skippedExisting}.
               </div>
             )}
           </div>
@@ -4636,7 +4807,16 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                       <div className="mt-4 border border-gray-200 rounded-lg overflow-hidden">
                         <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
                           <h3 className="font-semibold text-gray-900">Pending Orders Queue</h3>
-                          <span className="text-xs text-gray-600">{pendingOrders.length} active</span>
+                          <div className="flex items-center gap-3">
+                            <span className="text-xs text-gray-600">{pendingOrders.length} active</span>
+                            <button
+                              onClick={() => syncGeneratePendingOrders()}
+                              disabled={queueSyncing || updating}
+                              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white rounded text-xs font-medium"
+                            >
+                              {queueSyncing ? 'Syncing...' : 'Sync / Generate Pending Orders'}
+                            </button>
+                          </div>
                         </div>
                         {pendingOrders.length === 0 ? (
                           <div className="px-4 py-6 text-sm text-gray-500">No pending orders in queue.</div>
@@ -4647,6 +4827,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                                 ? 'bg-yellow-100 text-yellow-800'
                                 : order.status === 'reviewed'
                                   ? 'bg-blue-100 text-blue-800'
+                                  : order.status === 'ready_to_order'
+                                    ? 'bg-cyan-100 text-cyan-800'
                                   : 'bg-purple-100 text-purple-800'
 
                               return (
@@ -4679,6 +4861,16 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                                     )}
 
                                     {order.status === 'reviewed' && (
+                                      <button
+                                        onClick={() => updatePendingOrderStatus(order, 'ready_to_order')}
+                                        disabled={updating}
+                                        className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-700 disabled:bg-gray-400 text-white rounded text-xs font-medium"
+                                      >
+                                        Mark Ready
+                                      </button>
+                                    )}
+
+                                    {order.status === 'ready_to_order' && (
                                       <button
                                         onClick={() => updatePendingOrderStatus(order, 'ordered')}
                                         disabled={updating}
