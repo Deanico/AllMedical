@@ -241,15 +241,12 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
     if (!pendingOrderId) {
       const orderDetails = {
-        auto_generated: true,
-        generated_from: 'calendar_mark_shipped',
-        client_product_id: shipmentItem.id,
-        items: [
-          {
-            product_id: shipmentItem.product_id,
-            quantity: shipmentItem.quantity
-          }
-        ]
+        patient_name: shipmentItem.client_name || null,
+        product_name: shipmentItem.product_name || null,
+        product_id: shipmentItem.product_id || null,
+        quantity: shipmentItem.quantity || 1,
+        ship_date: nextShipDate,
+        auto_generated: true
       }
 
       const { data: insertedOrder, error: insertOrderError } = await supabase
@@ -831,7 +828,27 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
       if (error) throw error
 
+      if (nextStatus === 'shipped') {
+        const shippedDate = getLocalTodayDateString()
+        const nextShipDate = calculateAutoNextShipDate(shippedDate)
+
+        if (!order.client_product_id) {
+          alert('Order marked shipped, but schedule was not updated because client_product_id is missing on this order.')
+        } else {
+          const { error: scheduleError } = await supabase
+            .from('client_products')
+            .update({
+              last_ship_date: shippedDate,
+              next_ship_date: nextShipDate
+            })
+            .eq('id', order.client_product_id)
+
+          if (scheduleError) throw scheduleError
+        }
+      }
+
       await fetchPendingOrders()
+      await fetchShippingSchedule()
       alert(`Order updated to ${nextStatus}.`)
     } catch (error) {
       console.error('Error updating pending order status:', error)
@@ -1165,6 +1182,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     if (!supabase || !shipmentItem) return
 
     const today = getLocalTodayDateString()
+    const nowIso = new Date().toISOString()
+    const dueShipDate = shipmentItem.next_ship_date
     // next_ship_date = last_ship_date + 90 days − 2-day shipping buffer
     const nextShipDate = calculateAutoNextShipDate(today)
 
@@ -1181,6 +1200,31 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         .eq('id', shipmentItem.id)
 
       if (error) throw error
+
+      if (dueShipDate) {
+        const { data: currentCycleOrder, error: currentCycleOrderError } = await supabase
+          .from('pending_orders')
+          .select('id, status')
+          .eq('client_product_id', shipmentItem.id)
+          .eq('ship_date', dueShipDate)
+          .in('status', ['pending', 'reviewed', 'ordered'])
+          .order('created_at', { ascending: true })
+          .limit(1)
+
+        if (currentCycleOrderError) throw currentCycleOrderError
+
+        if (currentCycleOrder?.[0]?.id) {
+          const { error: closeOrderError } = await supabase
+            .from('pending_orders')
+            .update({
+              status: 'shipped',
+              shipped_at: nowIso
+            })
+            .eq('id', currentCycleOrder[0].id)
+
+          if (closeOrderError) throw closeOrderError
+        }
+      }
 
       if (selectedClient?.id === shipmentItem.lead_id) {
         await fetchClientProducts(selectedClient.id)
