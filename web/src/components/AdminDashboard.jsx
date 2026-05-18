@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { generatePhysicianOrder, downloadPDF } from '../lib/generatePhysicianOrder'
+import { generateTreatmentRecords, getTreatmentRecordSupplierLabel } from '../lib/generateTreatmentRecords'
 import { calculateInsuranceProjection } from '../lib/insuranceProjection'
 
 const parseDateInput = (value) => {
@@ -63,7 +64,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     zip_code: '',
     phone: ''
   })
-  const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', insurance: '', birthday: '', address_line1: '', city: '', state: '', zip_code: '', shipping_duration: '', payment_status: '', is_paused: false })
+  const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', insurance: '', insurance_id: '', insurance_deductible: '', insurance_oop_max: '', birthday: '', address_line1: '', city: '', state: '', zip_code: '', shipping_duration: '', payment_status: '', is_paused: false })
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState(null)
   const [queueSyncing, setQueueSyncing] = useState(false)
@@ -75,6 +76,12 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const [nppesLoading, setNppesLoading] = useState(false)
   const [showDoctorSelectModal, setShowDoctorSelectModal] = useState(false)
   const [generatingPDF, setGeneratingPDF] = useState(false)
+  const [showTreatmentRecordModal, setShowTreatmentRecordModal] = useState(false)
+  const [generatingTreatmentRecord, setGeneratingTreatmentRecord] = useState(false)
+  const [treatmentRecordForm, setTreatmentRecordForm] = useState({
+    supplierKey: 'all_medical',
+    initialServiceDate: new Date().toISOString().split('T')[0]
+  })
   const [showSuccessModal, setShowSuccessModal] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [clientSearchQuery, setClientSearchQuery] = useState('')
@@ -1549,6 +1556,68 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     }
   }
 
+  const handleOpenTreatmentRecordModal = () => {
+    if (!selectedClient) return
+
+    setTreatmentRecordForm((prev) => ({
+      supplierKey: prev.supplierKey || 'all_medical',
+      initialServiceDate: prev.initialServiceDate || new Date().toISOString().split('T')[0]
+    }))
+    setShowTreatmentRecordModal(true)
+  }
+
+  const handleGenerateTreatmentRecord = async () => {
+    if (!selectedClient) return
+
+    if (!treatmentRecordForm.initialServiceDate) {
+      alert('Please choose an Initial Date Services Began')
+      return
+    }
+
+    const primaryDoctor = doctors[0] || null
+
+    setGeneratingTreatmentRecord(true)
+    try {
+      const docBlob = await generateTreatmentRecords({
+        patient: selectedClient,
+        doctor: primaryDoctor,
+        supplierKey: treatmentRecordForm.supplierKey,
+        initialServiceDate: treatmentRecordForm.initialServiceDate
+      })
+
+      const patientName = (selectedClient.name || 'patient').replace(/[^a-z0-9]/gi, '_')
+      const dateStr = new Date().toISOString().split('T')[0]
+      const supplierLabel = getTreatmentRecordSupplierLabel(treatmentRecordForm.supplierKey).replace(/\s+/g, '_')
+      const fileName = `Treatment_Record_${supplierLabel}_${patientName}_${dateStr}.docx`
+
+      downloadPDF(docBlob, fileName)
+
+      const generatedAt = new Date().toISOString()
+      if (supabase) {
+        const { error } = await supabase
+          .from('leads')
+          .update({ treatment_record_generated_at: generatedAt })
+          .eq('id', selectedClient.id)
+
+        if (error) throw error
+
+        setSelectedClient({
+          ...selectedClient,
+          treatment_record_generated_at: generatedAt
+        })
+        await fetchLeads()
+      }
+
+      setShowTreatmentRecordModal(false)
+      alert('Treatment records document generated successfully!')
+    } catch (error) {
+      console.error('Error generating treatment records:', error)
+      alert('Failed to generate treatment records: ' + error.message)
+    } finally {
+      setGeneratingTreatmentRecord(false)
+    }
+  }
+
   const handleEditClient = async (e) => {
     e.preventDefault()
     if (!supabase || !selectedClient) return
@@ -1561,6 +1630,9 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         email: editForm.email,
         phone: editForm.phone,
         insurance: editForm.insurance,
+        insurance_id: editForm.insurance_id || null,
+        insurance_deductible: editForm.insurance_deductible ? parseFloat(editForm.insurance_deductible) : null,
+        insurance_oop_max: editForm.insurance_oop_max ? parseFloat(editForm.insurance_oop_max) : null,
         birthday: birthdayValue,
         address_line1: editForm.address_line1,
         city: editForm.city,
@@ -1610,6 +1682,9 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       email: selectedClient.email,
       phone: selectedClient.phone,
       insurance: selectedClient.insurance,
+      insurance_id: selectedClient.insurance_id || '',
+      insurance_deductible: selectedClient.insurance_deductible?.toString() || '',
+      insurance_oop_max: selectedClient.insurance_oop_max?.toString() || '',
       birthday: birthdayValue,
       address_line1: selectedClient.address_line1 || '',
       city: selectedClient.city || '',
@@ -1772,6 +1847,136 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       await fetchLeads()
     } catch (error) {
       console.error('Error marking insurance receipt for physician order:', error)
+      alert('Failed to update status')
+    }
+  }
+
+  const handleMarkTreatmentRecordSent = async () => {
+    if (!supabase || !selectedClient) return
+
+    try {
+      const sentAt = new Date().toISOString()
+
+      const { error } = await supabase
+        .from('leads')
+        .update({ treatment_record_sent_at: sentAt })
+        .eq('id', selectedClient.id)
+
+      if (error) throw error
+
+      setSelectedClient({
+        ...selectedClient,
+        treatment_record_sent_at: sentAt
+      })
+      await fetchLeads()
+    } catch (error) {
+      console.error('Error marking treatment record as sent:', error)
+      alert('Failed to update status')
+    }
+  }
+
+  const handleTreatmentRecordFileUpload = async (event) => {
+    const file = event.target.files?.[0]
+    if (!file || !supabase || !selectedClient) return
+
+    if (file.size > 10 * 1024 * 1024) {
+      alert('File size must be less than 10MB')
+      return
+    }
+
+    try {
+      setUpdating(true)
+
+      const fileExt = file.name.split('.').pop()
+      const fileName = `treatment_record_${selectedClient.id}_${Date.now()}.${fileExt}`
+
+      const { error: uploadError } = await supabase
+        .storage
+        .from('treatment-records')
+        .upload(fileName, file, {
+          cacheControl: '3600',
+          upsert: false
+        })
+
+      if (uploadError) throw uploadError
+
+      const { data: { publicUrl } } = supabase
+        .storage
+        .from('treatment-records')
+        .getPublicUrl(fileName)
+
+      const receivedAt = new Date().toISOString()
+
+      const { error: updateError } = await supabase
+        .from('leads')
+        .update({
+          treatment_record_file_url: publicUrl,
+          treatment_record_received_at: receivedAt
+        })
+        .eq('id', selectedClient.id)
+
+      if (updateError) throw updateError
+
+      setSelectedClient({
+        ...selectedClient,
+        treatment_record_file_url: publicUrl,
+        treatment_record_received_at: receivedAt
+      })
+      await fetchLeads()
+      alert('Signed treatment record uploaded successfully!')
+    } catch (error) {
+      console.error('Error uploading treatment record:', error)
+      alert('Failed to upload file: ' + error.message)
+    } finally {
+      setUpdating(false)
+      event.target.value = ''
+    }
+  }
+
+  const handleMarkTreatmentRecordReceived = async () => {
+    if (!supabase || !selectedClient) return
+
+    try {
+      const receivedAt = new Date().toISOString()
+
+      const { error } = await supabase
+        .from('leads')
+        .update({ treatment_record_received_at: receivedAt })
+        .eq('id', selectedClient.id)
+
+      if (error) throw error
+
+      setSelectedClient({
+        ...selectedClient,
+        treatment_record_received_at: receivedAt
+      })
+      await fetchLeads()
+    } catch (error) {
+      console.error('Error marking treatment record as received:', error)
+      alert('Failed to update status')
+    }
+  }
+
+  const handleMarkTreatmentRecordSentToInsurance = async () => {
+    if (!supabase || !selectedClient) return
+
+    try {
+      const sentToInsuranceAt = new Date().toISOString()
+
+      const { error } = await supabase
+        .from('leads')
+        .update({ treatment_record_sent_to_insurance_at: sentToInsuranceAt })
+        .eq('id', selectedClient.id)
+
+      if (error) throw error
+
+      setSelectedClient({
+        ...selectedClient,
+        treatment_record_sent_to_insurance_at: sentToInsuranceAt
+      })
+      await fetchLeads()
+    } catch (error) {
+      console.error('Error marking treatment record as sent to insurance:', error)
       alert('Failed to update status')
     }
   }
@@ -2597,6 +2802,36 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                         <div className="text-sm sm:text-base text-gray-900">{selectedClient.insurance}</div>
                       </div>
 
+                      {selectedClient.insurance_id && (
+                        <div>
+                          <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                            Insurance ID
+                          </label>
+                          <div className="text-sm sm:text-base text-gray-900">{selectedClient.insurance_id}</div>
+                        </div>
+                      )}
+
+                      {(selectedClient.insurance_deductible != null || selectedClient.insurance_oop_max != null) && (
+                        <div className="grid grid-cols-2 gap-3">
+                          {selectedClient.insurance_deductible != null && (
+                            <div>
+                              <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                                Deductible
+                              </label>
+                              <div className="text-sm sm:text-base text-gray-900">${Number(selectedClient.insurance_deductible).toLocaleString()}</div>
+                            </div>
+                          )}
+                          {selectedClient.insurance_oop_max != null && (
+                            <div>
+                              <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                                OOP Max
+                              </label>
+                              <div className="text-sm sm:text-base text-gray-900">${Number(selectedClient.insurance_oop_max).toLocaleString()}</div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       <div>
                         <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
                           Date Qualified
@@ -3134,6 +3369,184 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                         <p className="text-sm text-gray-500 mt-2 text-center">
                           {doctors.length === 0 ? 'Add a doctor to generate physician order' : 
                            !selectedClient.address_line1 && !selectedClient.birthday ? 'Patient address and DOB required' :
+                           !selectedClient.address_line1 ? 'Patient address required' :
+                           'Patient DOB required'}
+                        </p>
+                      )}
+
+                      {selectedClient.treatment_record_generated_at && (
+                        <div className="mt-4 mb-4 p-4 bg-emerald-50 border border-emerald-200 rounded-lg">
+                          <h4 className="font-semibold text-emerald-900 mb-3 flex items-center gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                              <path fillRule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm5 6a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V8z" clipRule="evenodd" />
+                            </svg>
+                            Treatment Record Status
+                          </h4>
+
+                          <div className="space-y-3">
+                            <div className="flex items-center gap-3">
+                              <div className="flex-shrink-0 w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
+                                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
+                                </svg>
+                              </div>
+                              <div className="flex-1">
+                                <div className="font-medium text-gray-900">Generated</div>
+                                <div className="text-sm text-gray-600">
+                                  {formatDate(selectedClient.treatment_record_generated_at)}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-3">
+                              <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center ${
+                                selectedClient.treatment_record_sent_at ? 'bg-green-500' : 'bg-gray-300'
+                              }`}>
+                                {selectedClient.treatment_record_sent_at ? (
+                                  <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
+                                  </svg>
+                                ) : (
+                                  <div className="w-2 h-2 bg-white rounded-full"></div>
+                                )}
+                              </div>
+                              <div className="flex-1">
+                                <div className="font-medium text-gray-900">Sent to Doctor</div>
+                                {selectedClient.treatment_record_sent_at ? (
+                                  <div className="text-sm text-gray-600">
+                                    {formatDate(selectedClient.treatment_record_sent_at)}
+                                  </div>
+                                ) : (
+                                  <button
+                                    onClick={handleMarkTreatmentRecordSent}
+                                    className="text-sm text-emerald-700 hover:text-emerald-900 font-medium"
+                                  >
+                                    Mark as Sent
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-3">
+                              <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center ${
+                                selectedClient.treatment_record_received_at ? 'bg-green-500' : 'bg-gray-300'
+                              }`}>
+                                {selectedClient.treatment_record_received_at ? (
+                                  <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
+                                  </svg>
+                                ) : (
+                                  <div className="w-2 h-2 bg-white rounded-full"></div>
+                                )}
+                              </div>
+                              <div className="flex-1">
+                                <div className="font-medium text-gray-900">Received Signed</div>
+                                {selectedClient.treatment_record_received_at ? (
+                                  <div className="text-sm text-gray-600">
+                                    {formatDate(selectedClient.treatment_record_received_at)}
+                                    {selectedClient.treatment_record_file_url && (
+                                      <div className="mt-1">
+                                        <a
+                                          href={selectedClient.treatment_record_file_url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="inline-flex items-center gap-1 text-emerald-700 hover:text-emerald-900 font-medium"
+                                        >
+                                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                            <path fillRule="evenodd" d="M8 4a3 3 0 00-3 3v4a5 5 0 0010 0V7a1 1 0 112 0v4a7 7 0 11-14 0V7a5 5 0 0110 0v4a3 3 0 11-6 0V7a1 1 0 012 0v4a1 1 0 102 0V7a3 3 0 00-3-3z" clipRule="evenodd" />
+                                          </svg>
+                                          View Signed Treatment Record
+                                        </a>
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : selectedClient.treatment_record_sent_at ? (
+                                  <div>
+                                    <label className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded cursor-pointer font-medium transition-colors">
+                                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                                      </svg>
+                                      Upload Signed Record
+                                      <input
+                                        type="file"
+                                        onChange={handleTreatmentRecordFileUpload}
+                                        accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                                        className="hidden"
+                                        disabled={updating}
+                                      />
+                                    </label>
+                                    <button
+                                      onClick={handleMarkTreatmentRecordReceived}
+                                      className="ml-2 text-sm text-gray-600 hover:text-gray-800 underline"
+                                    >
+                                      Mark received without file
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="text-sm text-gray-500">Send first to mark as received</div>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-3">
+                              <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center ${
+                                selectedClient.treatment_record_sent_to_insurance_at ? 'bg-green-500' : 'bg-gray-300'
+                              }`}>
+                                {selectedClient.treatment_record_sent_to_insurance_at ? (
+                                  <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
+                                  </svg>
+                                ) : (
+                                  <div className="w-2 h-2 bg-white rounded-full"></div>
+                                )}
+                              </div>
+                              <div className="flex-1">
+                                <div className="font-medium text-gray-900">Sent to Insurance (If Needed)</div>
+                                {selectedClient.treatment_record_sent_to_insurance_at ? (
+                                  <div className="text-sm text-gray-600">
+                                    {formatDate(selectedClient.treatment_record_sent_to_insurance_at)}
+                                  </div>
+                                ) : selectedClient.treatment_record_received_at ? (
+                                  <button
+                                    onClick={handleMarkTreatmentRecordSentToInsurance}
+                                    className="text-sm text-emerald-700 hover:text-emerald-900 font-medium"
+                                  >
+                                    Mark as Sent to Insurance
+                                  </button>
+                                ) : (
+                                  <div className="text-sm text-gray-500">Optional: available after signed record is received</div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      <button
+                        onClick={handleOpenTreatmentRecordModal}
+                        className="w-full mt-3 bg-emerald-600 hover:bg-emerald-700 text-white py-3 px-4 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                        disabled={!selectedClient.address_line1 || !selectedClient.birthday || generatingTreatmentRecord}
+                      >
+                        {generatingTreatmentRecord ? (
+                          <>
+                            <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Generating...
+                          </>
+                        ) : (
+                          <>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                              <path fillRule="evenodd" d="M4 3a1 1 0 011-1h7a1 1 0 01.707.293l3 3A1 1 0 0116 6v11a1 1 0 01-1 1H5a1 1 0 01-1-1V3zm2 2a1 1 0 000 2h6a1 1 0 100-2H6zm0 4a1 1 0 000 2h8a1 1 0 100-2H6zm0 4a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd" />
+                            </svg>
+                            {selectedClient.treatment_record_generated_at ? 'Regenerate Treatment Records' : 'Generate Treatment Records'}
+                          </>
+                        )}
+                      </button>
+                      {(!selectedClient.address_line1 || !selectedClient.birthday) && (
+                        <p className="text-sm text-gray-500 mt-2 text-center">
+                          {!selectedClient.address_line1 && !selectedClient.birthday ? 'Patient address and DOB required' :
                            !selectedClient.address_line1 ? 'Patient address required' :
                            'Patient DOB required'}
                         </p>
@@ -5520,6 +5933,48 @@ export default function AdminDashboard({ userEmail, onLogout }) {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Insurance ID Number
+                </label>
+                <input
+                  type="text"
+                  value={editForm.insurance_id}
+                  onChange={(e) => setEditForm({ ...editForm, insurance_id: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="e.g., XYZ123456789"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Deductible ($)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={editForm.insurance_deductible}
+                    onChange={(e) => setEditForm({ ...editForm, insurance_deductible: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="0.00"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    OOP Max ($)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={editForm.insurance_oop_max}
+                    onChange={(e) => setEditForm({ ...editForm, insurance_oop_max: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   Date of Birth
                 </label>
                 <input
@@ -5763,6 +6218,69 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                 className="px-4 py-2 text-gray-700 bg-gray-200 hover:bg-gray-300 rounded-md disabled:opacity-50"
               >
                 Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Treatment Records Modal */}
+      {showTreatmentRecordModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-xl font-bold text-gray-900 mb-4">Generate Treatment Records</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Select the supplier and initial date services began.
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Supplier</label>
+                <select
+                  value={treatmentRecordForm.supplierKey}
+                  onChange={(e) => setTreatmentRecordForm({ ...treatmentRecordForm, supplierKey: e.target.value })}
+                  disabled={generatingTreatmentRecord}
+                  className="w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                >
+                  <option value="all_medical">All Medical</option>
+                  <option value="solution8">Solution8</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Initial Date Services Began</label>
+                <input
+                  type="date"
+                  value={treatmentRecordForm.initialServiceDate}
+                  onChange={(e) => setTreatmentRecordForm({ ...treatmentRecordForm, initialServiceDate: e.target.value })}
+                  disabled={generatingTreatmentRecord}
+                  className="w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                />
+              </div>
+
+              {doctors.length === 0 && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+                  No doctor is attached to this patient yet. The doctor office fields in the template will be left blank.
+                </p>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 mt-6">
+              <button
+                type="button"
+                onClick={() => setShowTreatmentRecordModal(false)}
+                disabled={generatingTreatmentRecord}
+                className="px-4 py-2 text-gray-700 bg-gray-200 hover:bg-gray-300 rounded-md disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleGenerateTreatmentRecord}
+                disabled={generatingTreatmentRecord}
+                className="px-4 py-2 text-white bg-emerald-600 hover:bg-emerald-700 rounded-md disabled:opacity-50"
+              >
+                {generatingTreatmentRecord ? 'Generating...' : 'Generate'}
               </button>
             </div>
           </div>
