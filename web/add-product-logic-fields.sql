@@ -40,6 +40,14 @@ WHERE name ILIKE '%dexcom g6%sensor%' AND category = 'sensor';
 UPDATE products SET days_per_unit = 90, default_90_day_qty = 1, hcpcs = 'A9277'
 WHERE name ILIKE '%dexcom g6%transmitter%';
 
+-- Guardian 4 sensors (7-day wear -> 13 per 90 days)
+UPDATE products SET days_per_unit = 7, default_90_day_qty = 13, hcpcs = 'A9276'
+WHERE name ILIKE '%guardian%4%sensor%' AND category = 'sensor';
+
+-- Instinct sensors (align to standard 10-day sensor cadence -> 9 per 90 days)
+UPDATE products SET days_per_unit = 10, default_90_day_qty = 9, hcpcs = 'A9276'
+WHERE name ILIKE '%instinct%sensor%' AND category = 'sensor';
+
 -- Freestyle Libre 2 Plus sensor (14-day wear → 7 per 90 days)
 UPDATE products SET days_per_unit = 14, default_90_day_qty = 7, hcpcs = 'A9276'
 WHERE name ILIKE '%freestyle libre 2 plus%sensor%';
@@ -81,6 +89,14 @@ WHERE name ILIKE '%tandem%cartridge%' OR name ILIKE '%mobi%cartridge%';
 -- Tandem t:slim X2 cartridges — changed every 3 days → 30 per 90-day supply
 UPDATE products SET days_per_unit = 3, default_90_day_qty = 30, hcpcs = 'A4226'
 WHERE name ILIKE '%t:slim%cartridge%' OR name ILIKE '%tslim%cartridge%';
+
+-- iLet infusion sets — steel/soft infusion set cadence is every 3 days
+UPDATE products SET days_per_unit = 3, default_90_day_qty = 30, hcpcs = 'A4225'
+WHERE name ILIKE '%ilet%infusion%' OR name ILIKE '%bionic%ilet%detach%steel%';
+
+-- iLet cartridges — cartridge/reservoir cadence is every 3 days
+UPDATE products SET days_per_unit = 3, default_90_day_qty = 30, hcpcs = 'A4226'
+WHERE name ILIKE '%ilet%cartridge%';
 
 -- ============================================================
 -- 4. Deactivate removed product lines

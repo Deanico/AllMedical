@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { generatePhysicianOrder, downloadPDF } from '../lib/generatePhysicianOrder'
 import { generateTreatmentRecords, getTreatmentRecordSupplierLabel } from '../lib/generateTreatmentRecords'
+import { generateHardshipForm } from '../lib/generateHardshipForm'
 import { calculateInsuranceProjection } from '../lib/insuranceProjection'
 
 const parseDateInput = (value) => {
@@ -143,6 +144,9 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     next_ship_date: new Date().toISOString().split('T')[0],
     frequency_days: 30
   })
+  const [showEditClientProductModal, setShowEditClientProductModal] = useState(false)
+  const [editingClientProduct, setEditingClientProduct] = useState(null)
+  const [editClientProductForm, setEditClientProductForm] = useState({ quantity: 1, next_ship_date: '' })
   const [shippingScheduleItems, setShippingScheduleItems] = useState([])
 
   // Projects & Tasks State
@@ -1981,6 +1985,150 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     }
   }
 
+  const handleGenerateHardshipForm = async () => {
+    if (!selectedClient) return
+
+    setGeneratingTreatmentRecord(true)
+    try {
+      const docBlob = await generateHardshipForm({ patient: selectedClient })
+
+      const patientName = (selectedClient.name || 'patient').replace(/[^a-z0-9]/gi, '_')
+      const dateStr = new Date().toISOString().split('T')[0]
+      const fileName = `Hardship_Form_${patientName}_${dateStr}.docx`
+
+      downloadPDF(docBlob, fileName)
+
+      const generatedAt = new Date().toISOString()
+      if (supabase) {
+        const { error } = await supabase
+          .from('leads')
+          .update({ hardship_form_generated_at: generatedAt })
+          .eq('id', selectedClient.id)
+
+        if (error) throw error
+
+        setSelectedClient({
+          ...selectedClient,
+          hardship_form_generated_at: generatedAt
+        })
+        await fetchLeads()
+      }
+
+      alert('Hardship form generated successfully!')
+    } catch (error) {
+      console.error('Error generating hardship form:', error)
+      alert('Failed to generate hardship form: ' + error.message)
+    } finally {
+      setGeneratingTreatmentRecord(false)
+    }
+  }
+
+  const handleMarkHardshipFormSent = async () => {
+    if (!supabase || !selectedClient) return
+
+    try {
+      const sentAt = new Date().toISOString()
+
+      const { error } = await supabase
+        .from('leads')
+        .update({ hardship_form_sent_at: sentAt })
+        .eq('id', selectedClient.id)
+
+      if (error) throw error
+
+      setSelectedClient({
+        ...selectedClient,
+        hardship_form_sent_at: sentAt
+      })
+      await fetchLeads()
+    } catch (error) {
+      console.error('Error marking hardship form as sent:', error)
+      alert('Failed to update status')
+    }
+  }
+
+  const handleHardshipFormFileUpload = async (event) => {
+    const file = event.target.files?.[0]
+    if (!file || !supabase || !selectedClient) return
+
+    if (file.size > 10 * 1024 * 1024) {
+      alert('File size must be less than 10MB')
+      return
+    }
+
+    try {
+      setUpdating(true)
+
+      const fileExt = file.name.split('.').pop()
+      const fileName = `hardship_form_${selectedClient.id}_${Date.now()}.${fileExt}`
+
+      const { error: uploadError } = await supabase
+        .storage
+        .from('treatment-records')
+        .upload(fileName, file, {
+          cacheControl: '3600',
+          upsert: false
+        })
+
+      if (uploadError) throw uploadError
+
+      const { data: { publicUrl } } = supabase
+        .storage
+        .from('treatment-records')
+        .getPublicUrl(fileName)
+
+      const receivedAt = new Date().toISOString()
+
+      const { error: updateError } = await supabase
+        .from('leads')
+        .update({
+          hardship_form_file_url: publicUrl,
+          hardship_form_received_at: receivedAt
+        })
+        .eq('id', selectedClient.id)
+
+      if (updateError) throw updateError
+
+      setSelectedClient({
+        ...selectedClient,
+        hardship_form_file_url: publicUrl,
+        hardship_form_received_at: receivedAt
+      })
+      await fetchLeads()
+      alert('Hardship form uploaded successfully!')
+    } catch (error) {
+      console.error('Error uploading hardship form:', error)
+      alert('Failed to upload file: ' + error.message)
+    } finally {
+      setUpdating(false)
+      event.target.value = ''
+    }
+  }
+
+  const handleMarkHardshipFormReceived = async () => {
+    if (!supabase || !selectedClient) return
+
+    try {
+      const receivedAt = new Date().toISOString()
+
+      const { error } = await supabase
+        .from('leads')
+        .update({ hardship_form_received_at: receivedAt })
+        .eq('id', selectedClient.id)
+
+      if (error) throw error
+
+      setSelectedClient({
+        ...selectedClient,
+        hardship_form_received_at: receivedAt
+      })
+      await fetchLeads()
+    } catch (error) {
+      console.error('Error marking hardship form as received:', error)
+      alert('Failed to update status')
+    }
+  }
+
   const handleSyncFromSheets = async () => {
     setSyncing(true)
     setSyncResult(null)
@@ -2890,26 +3038,41 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                                   Quantity: {cp.quantity} • Next Ship: {cp.next_ship_date ? formatDate(cp.next_ship_date) : 'Not set'}
                                 </div>
                               </div>
-                              <button
-                                onClick={async () => {
-                                  if (confirm(`Remove ${cp.products?.name} from this client?`)) {
-                                    try {
-                                      const { error } = await supabase
-                                        .from('client_products')
-                                        .update({ active: false })
-                                        .eq('id', cp.id)
-                                      if (error) throw error
-                                      await fetchClientProducts(selectedClient.id)
-                                    } catch (error) {
-                                      console.error('Error removing product:', error)
-                                      alert('Failed to remove product')
+                              <div className="flex items-center gap-2 ml-3">
+                                <button
+                                  onClick={() => {
+                                    setEditingClientProduct(cp)
+                                    setEditClientProductForm({
+                                      quantity: cp.quantity,
+                                      next_ship_date: cp.next_ship_date || ''
+                                    })
+                                    setShowEditClientProductModal(true)
+                                  }}
+                                  className="text-blue-600 hover:text-blue-700 text-xs font-medium"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    if (confirm(`Remove ${cp.products?.name} from this client?`)) {
+                                      try {
+                                        const { error } = await supabase
+                                          .from('client_products')
+                                          .update({ active: false })
+                                          .eq('id', cp.id)
+                                        if (error) throw error
+                                        await fetchClientProducts(selectedClient.id)
+                                      } catch (error) {
+                                        console.error('Error removing product:', error)
+                                        alert('Failed to remove product')
+                                      }
                                     }
-                                  }
-                                }}
-                                className="ml-3 text-red-600 hover:text-red-700 text-xs font-medium"
-                              >
-                                Remove
-                              </button>
+                                  }}
+                                  className="text-red-600 hover:text-red-700 text-xs font-medium"
+                                >
+                                  Remove
+                                </button>
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -3553,6 +3716,145 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                       )}
                     </div>
 
+                    {/* Hardship Form Status */}
+                    {selectedClient.hardship_form_generated_at && (
+                      <div className="border-t pt-4">
+                        <h4 className="text-sm font-semibold text-gray-700 mb-4">📋 Hardship Form Status</h4>
+                        
+                        <div className="space-y-4">
+                          <div className="flex items-center gap-3">
+                            <div className="flex-shrink-0 w-6 h-6 rounded-full bg-green-500 flex items-center justify-center">
+                              <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
+                              </svg>
+                            </div>
+                            <div className="flex-1">
+                              <div className="font-medium text-gray-900">Generated</div>
+                              <div className="text-sm text-gray-600">{formatDate(selectedClient.hardship_form_generated_at)}</div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-3">
+                            <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center ${
+                              selectedClient.hardship_form_sent_at ? 'bg-green-500' : 'bg-gray-300'
+                            }`}>
+                              {selectedClient.hardship_form_sent_at ? (
+                                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
+                                </svg>
+                              ) : (
+                                <div className="w-2 h-2 bg-white rounded-full"></div>
+                              )}
+                            </div>
+                            <div className="flex-1">
+                              <div className="font-medium text-gray-900">Sent to Patient</div>
+                              {selectedClient.hardship_form_sent_at ? (
+                                <div className="text-sm text-gray-600">{formatDate(selectedClient.hardship_form_sent_at)}</div>
+                              ) : selectedClient.hardship_form_generated_at ? (
+                                <button
+                                  onClick={handleMarkHardshipFormSent}
+                                  className="text-sm text-emerald-700 hover:text-emerald-900 font-medium"
+                                >
+                                  Mark as Sent
+                                </button>
+                              ) : (
+                                <div className="text-sm text-gray-500">Generate first</div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-3">
+                            <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center ${
+                              selectedClient.hardship_form_received_at ? 'bg-green-500' : 'bg-gray-300'
+                            }`}>
+                              {selectedClient.hardship_form_received_at ? (
+                                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
+                                </svg>
+                              ) : (
+                                <div className="w-2 h-2 bg-white rounded-full"></div>
+                              )}
+                            </div>
+                            <div className="flex-1">
+                              <div className="font-medium text-gray-900">Received Completed</div>
+                              {selectedClient.hardship_form_received_at ? (
+                                <div className="text-sm text-gray-600">
+                                  {formatDate(selectedClient.hardship_form_received_at)}
+                                  {selectedClient.hardship_form_file_url && (
+                                    <a
+                                      href={selectedClient.hardship_form_file_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="ml-2 text-emerald-700 hover:text-emerald-900 underline flex items-center gap-1 inline-flex"
+                                    >
+                                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fillRule="evenodd" d="M8 4a3 3 0 00-3 3v4a5 5 0 0010 0V7a1 1 0 112 0v4a7 7 0 11-14 0V7a5 5 0 0110 0v4a3 3 0 11-6 0V7a1 1 0 012 0v4a1 1 0 102 0V7a3 3 0 00-3-3z" clipRule="evenodd" />
+                                      </svg>
+                                      View File
+                                    </a>
+                                  )}
+                                </div>
+                              ) : selectedClient.hardship_form_sent_at ? (
+                                <div>
+                                  <label className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded cursor-pointer font-medium transition-colors">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                      <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                                    </svg>
+                                    Upload Completed Form
+                                    <input
+                                      type="file"
+                                      onChange={handleHardshipFormFileUpload}
+                                      accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                                      className="hidden"
+                                      disabled={updating}
+                                    />
+                                  </label>
+                                  <button
+                                    onClick={handleMarkHardshipFormReceived}
+                                    className="ml-2 text-sm text-gray-600 hover:text-gray-800 underline"
+                                  >
+                                    Mark received without file
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="text-sm text-gray-500">Send first to receive</div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <button
+                      onClick={handleGenerateHardshipForm}
+                      className="w-full mt-3 bg-amber-600 hover:bg-amber-700 text-white py-3 px-4 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                      disabled={!selectedClient.address_line1 || !selectedClient.birthday || generatingTreatmentRecord}
+                    >
+                      {generatingTreatmentRecord ? (
+                        <>
+                          <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          Generating...
+                        </>
+                      ) : (
+                        <>
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M4 3a1 1 0 011-1h7a1 1 0 01.707.293l3 3A1 1 0 0116 6v11a1 1 0 01-1 1H5a1 1 0 01-1-1V3zm2 2a1 1 0 000 2h6a1 1 0 100-2H6zm0 4a1 1 0 000 2h8a1 1 0 100-2H6zm0 4a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd" />
+                          </svg>
+                          {selectedClient.hardship_form_generated_at ? 'Regenerate Hardship Form' : 'Generate Hardship Form'}
+                        </>
+                      )}
+                    </button>
+                    {(!selectedClient.address_line1 || !selectedClient.birthday) && (
+                      <p className="text-sm text-gray-500 mt-2 text-center">
+                        {!selectedClient.address_line1 && !selectedClient.birthday ? 'Patient address and DOB required' :
+                         !selectedClient.address_line1 ? 'Patient address required' :
+                         'Patient DOB required'}
+                      </p>
+                    )}
+
                     {selectedClient.notes && (
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -3573,6 +3875,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
             </div>
           </div>
         )}
+
+        {/* Remove duplicate Notes section that was here */}
 
         {/* Calendar View */}
         {activeView === 'calendar' && (
@@ -6604,6 +6908,77 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
                 >
                   Assign Product
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Client Product Modal */}
+      {showEditClientProductModal && editingClientProduct && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-sm">
+            <h3 className="text-lg font-bold text-gray-900 mb-4">
+              Edit {editingClientProduct.products?.name}
+            </h3>
+            <form onSubmit={async (e) => {
+              e.preventDefault()
+              try {
+                const { error } = await supabase
+                  .from('client_products')
+                  .update({
+                    quantity: parseInt(editClientProductForm.quantity),
+                    next_ship_date: editClientProductForm.next_ship_date || null
+                  })
+                  .eq('id', editingClientProduct.id)
+                if (error) throw error
+                await fetchClientProducts(editingClientProduct.lead_id)
+                await fetchShippingSchedule()
+                setShowEditClientProductModal(false)
+                setEditingClientProduct(null)
+              } catch (err) {
+                console.error('Error updating product:', err)
+                alert('Failed to update product')
+              }
+            }} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Quantity per shipment</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={editClientProductForm.quantity}
+                  onChange={(e) => setEditClientProductForm({ ...editClientProductForm, quantity: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Next Ship Date</label>
+                <input
+                  type="date"
+                  value={editClientProductForm.next_ship_date}
+                  onChange={(e) => setEditClientProductForm({ ...editClientProductForm, next_ship_date: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div className="flex gap-3 justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditClientProductModal(false)
+                    setEditingClientProduct(null)
+                  }}
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                >
+                  Save Changes
                 </button>
               </div>
             </form>
