@@ -64,22 +64,26 @@ WHERE name ILIKE '%freestyle libre 3 sensor%' AND name NOT ILIKE '%plus%';
 UPDATE products SET days_per_unit = 14, default_90_day_qty = 7, hcpcs = 'A9276'
 WHERE name ILIKE '%freestyle libre 2 sensor%' AND name NOT ILIKE '%plus%';
 
--- Omnipod 5 pods — each pod lasts 3 days, so 30 pods per 90-day supply
-UPDATE products SET days_per_unit = 3, default_90_day_qty = 30, hcpcs = 'A9274'
+-- Omnipod 5 pods — each pod lasts 2.5 days, so 36 pods per 90-day supply
+UPDATE products SET days_per_unit = 2.5, default_90_day_qty = 36, hcpcs = 'A9274'
 WHERE name ILIKE '%omnipod 5%' AND category = 'pod';
 
--- Omnipod DASH pods — each pod lasts 3 days, so 30 pods per 90-day supply
-UPDATE products SET days_per_unit = 3, default_90_day_qty = 30, hcpcs = 'A9274'
+-- Omnipod DASH pods — each pod lasts 2.5 days, so 36 pods per 90-day supply
+UPDATE products SET days_per_unit = 2.5, default_90_day_qty = 36, hcpcs = 'A9274'
 WHERE name ILIKE '%omnipod dash%' AND category = 'pod';
 
--- Tandem Autosoft XC infusion sets — soft cannula, changed every 3 days → 30 per 90-day supply
+-- Tandem Autosoft XC infusion sets — soft cannula, changed every 2.5 days → 36 per 90-day supply
 -- HCPCS A4225 = insulin infusion pump, soft cannula infusion set
-UPDATE products SET days_per_unit = 3, default_90_day_qty = 30, hcpcs = 'A4225'
+UPDATE products SET days_per_unit = 2.5, default_90_day_qty = 36, hcpcs = 'A4225'
 WHERE name ILIKE '%autosoft xc%' AND category = 'infusion_set';
 
--- Tandem AutoSoft 90 infusion sets — soft cannula, changed every 3 days → 30 per 90-day supply
-UPDATE products SET days_per_unit = 3, default_90_day_qty = 30, hcpcs = 'A4225'
+-- Tandem AutoSoft 90 infusion sets — soft cannula, changed every 2.5 days → 36 per 90-day supply
+UPDATE products SET days_per_unit = 2.5, default_90_day_qty = 36, hcpcs = 'A4225'
 WHERE name ILIKE '%autosoft 90%' AND category = 'infusion_set';
+
+-- MiniMed Mio ADVANCED infusion sets — soft cannula, changed every 2.5 days → 36 per 90-day supply
+UPDATE products SET days_per_unit = 2.5, default_90_day_qty = 36, hcpcs = 'A4225'
+WHERE name ILIKE '%mio%advanced%' AND category = 'infusion_set';
 
 -- Tandem Mobi cartridges — changed every 3 days → 30 per 90-day supply
 -- HCPCS A4226 = insulin pump cartridges/reservoirs
