@@ -190,11 +190,26 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     return `${year}-${month}-${day}`
   }
 
-  // Formula: next_ship_date = last_ship_date + 90 days − 2-day shipping buffer = +88 days
-  const calculateAutoNextShipDate = (fromDateStr) => {
+  // Formula: next_ship_date = last_ship_date + (qty * days_per_unit) - shipping buffer
+  // Fallback to frequency_days, then 90-day default when usage data is missing.
+  const calculateAutoNextShipDate = ({ fromDateStr, quantity, daysPerUnit, frequencyDays, shippingBufferDays = 2 } = {}) => {
     const base = fromDateStr ? new Date(`${fromDateStr}T00:00:00`) : new Date()
     base.setHours(0, 0, 0, 0)
-    base.setDate(base.getDate() + 88)
+
+    const qtyValue = Number(quantity)
+    const daysPerUnitValue = Number(daysPerUnit)
+    const frequencyValue = Number(frequencyDays)
+
+    let supplyDays = 90
+    if (Number.isFinite(qtyValue) && qtyValue > 0 && Number.isFinite(daysPerUnitValue) && daysPerUnitValue > 0) {
+      supplyDays = qtyValue * daysPerUnitValue
+    } else if (Number.isFinite(frequencyValue) && frequencyValue > 0) {
+      supplyDays = frequencyValue
+    }
+
+    // Floor keeps at least the intended shipping buffer for fractional-day supplies.
+    const daysToAdd = Math.max(1, Math.floor(supplyDays - shippingBufferDays))
+    base.setDate(base.getDate() + daysToAdd)
     return base.toISOString().split('T')[0]
   }
 
@@ -882,7 +897,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
           products (
             id,
             name,
-            category
+            category,
+            days_per_unit
           ),
           leads (
             id,
@@ -898,7 +914,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       const normalized = (data || []).map(item => ({
         ...item,
         client_name: item.leads?.name || 'Unknown Client',
-        product_name: item.products?.name || 'Unknown Product'
+        product_name: item.products?.name || 'Unknown Product',
+        days_per_unit: item.products?.days_per_unit ?? null
       }))
 
       setShippingScheduleItems(normalized)
@@ -997,7 +1014,42 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
       if (nextStatus === 'shipped') {
         const shippedDate = getLocalTodayDateString()
-        const nextShipDate = calculateAutoNextShipDate(shippedDate)
+        let scheduleBasis = {
+          quantity: null,
+          days_per_unit: null,
+          frequency_days: null
+        }
+
+        if (order.client_product_id) {
+          const { data: clientProductData, error: clientProductError } = await supabase
+            .from('client_products')
+            .select(`
+              quantity,
+              frequency_days,
+              products (
+                days_per_unit
+              )
+            `)
+            .eq('id', order.client_product_id)
+            .single()
+
+          if (clientProductError) {
+            console.warn('Could not load client product usage for schedule calculation:', clientProductError)
+          } else if (clientProductData) {
+            scheduleBasis = {
+              quantity: clientProductData.quantity,
+              days_per_unit: clientProductData.products?.days_per_unit ?? null,
+              frequency_days: clientProductData.frequency_days
+            }
+          }
+        }
+
+        const nextShipDate = calculateAutoNextShipDate({
+          fromDateStr: shippedDate,
+          quantity: scheduleBasis.quantity,
+          daysPerUnit: scheduleBasis.days_per_unit,
+          frequencyDays: scheduleBasis.frequency_days
+        })
 
         if (!order.client_product_id) {
           alert('Order marked shipped, but schedule was not updated because client_product_id is missing on this order.')
@@ -1351,8 +1403,12 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     const today = getLocalTodayDateString()
     const nowIso = new Date().toISOString()
     const dueShipDate = shipmentItem.next_ship_date
-    // next_ship_date = last_ship_date + 90 days − 2-day shipping buffer
-    const nextShipDate = calculateAutoNextShipDate(today)
+    const nextShipDate = calculateAutoNextShipDate({
+      fromDateStr: today,
+      quantity: shipmentItem.quantity,
+      daysPerUnit: shipmentItem.days_per_unit,
+      frequencyDays: shipmentItem.frequency_days
+    })
 
     setUpdating(true)
     try {
