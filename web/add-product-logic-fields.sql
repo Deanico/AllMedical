@@ -10,7 +10,7 @@ BEGIN;
 -- 1. Add new columns to products table
 -- ============================================================
 ALTER TABLE products
-  ADD COLUMN IF NOT EXISTS days_per_unit     INTEGER,       -- how many days one unit lasts
+  ADD COLUMN IF NOT EXISTS days_per_unit     NUMERIC(6,2),  -- how many days one unit lasts; supports fractional values like 2.5
   ADD COLUMN IF NOT EXISTS default_90_day_qty INTEGER,      -- standard quantity for 90-day supply
   ADD COLUMN IF NOT EXISTS hcpcs             TEXT;          -- billing/HCPCS code
 
@@ -85,21 +85,21 @@ WHERE name ILIKE '%autosoft 90%' AND category = 'infusion_set';
 UPDATE products SET days_per_unit = 2.5, default_90_day_qty = 36, hcpcs = 'A4225'
 WHERE name ILIKE '%mio%advanced%' AND category = 'infusion_set';
 
--- Tandem Mobi cartridges — changed every 3 days → 30 per 90-day supply
+-- Tandem Mobi cartridges — changed every 2.5 days -> 36 per 90-day supply
 -- HCPCS A4226 = insulin pump cartridges/reservoirs
-UPDATE products SET days_per_unit = 3, default_90_day_qty = 30, hcpcs = 'A4226'
+UPDATE products SET days_per_unit = 2.5, default_90_day_qty = 36, hcpcs = 'A4226'
 WHERE name ILIKE '%tandem%cartridge%' OR name ILIKE '%mobi%cartridge%';
 
--- Tandem t:slim X2 cartridges — changed every 3 days → 30 per 90-day supply
-UPDATE products SET days_per_unit = 3, default_90_day_qty = 30, hcpcs = 'A4226'
+-- Tandem t:slim X2 cartridges — changed every 2.5 days -> 36 per 90-day supply
+UPDATE products SET days_per_unit = 2.5, default_90_day_qty = 36, hcpcs = 'A4226'
 WHERE name ILIKE '%t:slim%cartridge%' OR name ILIKE '%tslim%cartridge%';
 
--- iLet infusion sets — steel/soft infusion set cadence is every 3 days
-UPDATE products SET days_per_unit = 3, default_90_day_qty = 30, hcpcs = 'A4225'
+-- iLet infusion sets — steel/soft infusion set cadence is every 2.5 days
+UPDATE products SET days_per_unit = 2.5, default_90_day_qty = 36, hcpcs = 'A4225'
 WHERE name ILIKE '%ilet%infusion%' OR name ILIKE '%bionic%ilet%detach%steel%';
 
--- iLet cartridges — cartridge/reservoir cadence is every 3 days
-UPDATE products SET days_per_unit = 3, default_90_day_qty = 30, hcpcs = 'A4226'
+-- iLet cartridges — cartridge/reservoir cadence is every 2.5 days
+UPDATE products SET days_per_unit = 2.5, default_90_day_qty = 36, hcpcs = 'A4226'
 WHERE name ILIKE '%ilet%cartridge%';
 
 -- ============================================================

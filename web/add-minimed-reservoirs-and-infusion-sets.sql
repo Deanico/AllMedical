@@ -43,8 +43,8 @@ WHERE NOT EXISTS (SELECT 1 FROM products WHERE sku = 'MM-EXT-9-23');
 
 -- 5) Product logic defaults for automation
 UPDATE products
-SET days_per_unit = 3,
-    default_90_day_qty = 30,
+SET days_per_unit = 2.5,
+    default_90_day_qty = 36,
     hcpcs = COALESCE(hcpcs, 'A4225'),
     active = true,
     updated_at = NOW()
@@ -55,8 +55,8 @@ WHERE sku IN ('MM-MIOA-6-23', 'MM-MIOA-9-23', 'MM-EXT-6-23', 'MM-EXT-9-23')
    );
 
 UPDATE products
-SET days_per_unit = 3,
-    default_90_day_qty = 30,
+SET days_per_unit = 2.5,
+    default_90_day_qty = 36,
     hcpcs = COALESCE(hcpcs, 'A4226'),
     active = true,
     updated_at = NOW()

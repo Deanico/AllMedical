@@ -79,10 +79,10 @@ WHERE name IN (
 );
 
 -- 3) Apply shipping/product logic defaults so calendar automation behaves like existing products
--- Infusion sets: typically changed every 3 days
+-- Infusion sets: changed every 2.5 days
 UPDATE products
-SET days_per_unit = 3,
-    default_90_day_qty = 30,
+SET days_per_unit = 2.5,
+    default_90_day_qty = 36,
     hcpcs = COALESCE(hcpcs, 'A4225'),
     updated_at = NOW()
 WHERE name IN (
@@ -90,10 +90,10 @@ WHERE name IN (
   'Bionic iLet infusion set Detach Steel 23"6mm'
 );
 
--- Reservoir/cartridge products: typically changed every 3 days
+-- Reservoir/cartridge products: changed every 2.5 days
 UPDATE products
-SET days_per_unit = 3,
-    default_90_day_qty = 30,
+SET days_per_unit = 2.5,
+    default_90_day_qty = 36,
     hcpcs = COALESCE(hcpcs, 'A4226'),
     updated_at = NOW()
 WHERE name = 'iLet Cartridges';
