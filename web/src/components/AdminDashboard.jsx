@@ -88,6 +88,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const [clientSearchQuery, setClientSearchQuery] = useState('')
   const [insuranceFilter, setInsuranceFilter] = useState('')
   const [productFilter, setProductFilter] = useState('')
+  const [stateFilter, setStateFilter] = useState('')
+  const [profitMarginSort, setProfitMarginSort] = useState('')
   const [clientStatusFilter, setClientStatusFilter] = useState('active')
   const [showAddLeadModal, setShowAddLeadModal] = useState(false)
   const [addLeadForm, setAddLeadForm] = useState({ 
@@ -188,6 +190,32 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     const month = String(today.getMonth() + 1).padStart(2, '0')
     const day = String(today.getDate()).padStart(2, '0')
     return `${year}-${month}-${day}`
+  }
+
+  const getClientProfitMargin = (client) => {
+    const deductible = parseFloat(client?.calc_deductible)
+    const oopMax = parseFloat(client?.calc_oop_max)
+    const percentOfAllowable = parseFloat(client?.calc_percent_allowable)
+    const allowableAmount = parseFloat(client?.calc_insurance_paid)
+    const costOfProduct = parseFloat(client?.calc_product_cost)
+
+    if (!Number.isFinite(percentOfAllowable) || !Number.isFinite(allowableAmount) || !Number.isFinite(costOfProduct)) {
+      return null
+    }
+
+    const { netYearlyProfit, totalCost } = calculateInsuranceProjection({
+      deductible: Number.isFinite(deductible) ? deductible : 0,
+      oopMax: Number.isFinite(oopMax) ? oopMax : 0,
+      percentOfAllowable,
+      allowableAmount,
+      costOfProduct
+    })
+
+    if (!Number.isFinite(totalCost) || totalCost <= 0) {
+      return null
+    }
+
+    return (netYearlyProfit / totalCost) * 100
   }
 
   // Formula: next_ship_date = last_ship_date + (qty * days_per_unit) - shipping buffer
@@ -2786,7 +2814,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                     onChange={(e) => setClientSearchQuery(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                   />
-                  <div className="flex gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-2">
                     <select
                       value={clientStatusFilter}
                       onChange={(e) => {
@@ -2802,23 +2830,56 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                     <select
                       value={insuranceFilter}
                       onChange={(e) => setInsuranceFilter(e.target.value)}
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                      className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                     >
                       <option value="">All Insurance</option>
-                      {[...new Set((clientStatusFilter === 'paused' ? qualifiedLeads.filter(c => c.is_paused) : activeQualifiedLeads).map(c => c.insurance).filter(Boolean))].sort().map(insurance => (
+                      {[...new Set((
+                        clientStatusFilter === 'paused'
+                          ? qualifiedLeads.filter(c => c.is_paused)
+                          : clientStatusFilter === 'all'
+                            ? qualifiedLeads
+                            : activeQualifiedLeads
+                      ).map(c => c.insurance).filter(Boolean))].sort().map(insurance => (
                         <option key={insurance} value={insurance}>{insurance}</option>
                       ))}
                     </select>
                     <select
                       value={productFilter}
                       onChange={(e) => setProductFilter(e.target.value)}
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                      className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                     >
                       <option value="">All Products</option>
                       <option value="sensor">CGM Sensors</option>
                       <option value="pod">Pods</option>
                       <option value="infusion_set">Infusion Sets</option>
                       <option value="test_strips">Test Strips</option>
+                    </select>
+                    <select
+                      value={stateFilter}
+                      onChange={(e) => setStateFilter(e.target.value)}
+                      className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    >
+                      <option value="">All States</option>
+                      {[...new Set((
+                        clientStatusFilter === 'paused'
+                          ? qualifiedLeads.filter(c => c.is_paused)
+                          : clientStatusFilter === 'all'
+                            ? qualifiedLeads
+                            : activeQualifiedLeads
+                      ).map(c => c.state?.trim().toUpperCase()).filter(Boolean))].sort().map(state => (
+                        <option key={state} value={state}>{state}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={profitMarginSort}
+                      onChange={(e) => setProfitMarginSort(e.target.value)}
+                      className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    >
+                      <option value="">Default Order</option>
+                      <option value="highest">Highest Profit Margin</option>
+                      <option value="lowest">Lowest Profit Margin</option>
+                      <option value="top10">Top 10 by Profit Margin</option>
+                      <option value="top25pct">Top 25% by Profit Margin</option>
                     </select>
                   </div>
                 </div>
@@ -2857,13 +2918,61 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                       return clientProds.some(p => p.category === productFilter);
                     });
                   }
+
+                  // State filter (from address)
+                  if (stateFilter) {
+                    filtered = filtered.filter(client => (client.state || '').trim().toUpperCase() === stateFilter)
+                  }
+
+                  const withMargin = filtered.map(client => ({
+                    client,
+                    profitMargin: getClientProfitMargin(client)
+                  }))
+                  const marginEligibleCount = withMargin.filter(item => Number.isFinite(item.profitMargin)).length
+                  const isTopMarginMode = profitMarginSort === 'top10' || profitMarginSort === 'top25pct'
+
+                  if (profitMarginSort === 'highest') {
+                    withMargin.sort((a, b) => {
+                      const aValue = Number.isFinite(a.profitMargin) ? a.profitMargin : Number.NEGATIVE_INFINITY
+                      const bValue = Number.isFinite(b.profitMargin) ? b.profitMargin : Number.NEGATIVE_INFINITY
+                      return bValue - aValue
+                    })
+                  } else if (profitMarginSort === 'lowest') {
+                    withMargin.sort((a, b) => {
+                      const aValue = Number.isFinite(a.profitMargin) ? a.profitMargin : Number.POSITIVE_INFINITY
+                      const bValue = Number.isFinite(b.profitMargin) ? b.profitMargin : Number.POSITIVE_INFINITY
+                      return aValue - bValue
+                    })
+                  } else if (profitMarginSort === 'top10' || profitMarginSort === 'top25pct') {
+                    withMargin.sort((a, b) => {
+                      const aValue = Number.isFinite(a.profitMargin) ? a.profitMargin : Number.NEGATIVE_INFINITY
+                      const bValue = Number.isFinite(b.profitMargin) ? b.profitMargin : Number.NEGATIVE_INFINITY
+                      return bValue - aValue
+                    })
+
+                    const finiteMarginClients = withMargin.filter(item => Number.isFinite(item.profitMargin))
+                    const maxTopCount = profitMarginSort === 'top10'
+                      ? Math.min(10, finiteMarginClients.length)
+                      : Math.max(1, Math.ceil(finiteMarginClients.length * 0.25))
+
+                    const topClientIds = new Set(finiteMarginClients.slice(0, maxTopCount).map(item => item.client.id))
+                    const topOnly = withMargin.filter(item => topClientIds.has(item.client.id))
+
+                    withMargin.splice(0, withMargin.length, ...topOnly)
+                  }
                   
-                  return filtered.length === 0 ? (
+                  return withMargin.length === 0 ? (
                     <div className="p-8 text-center text-gray-500">
                       {qualifiedLeads.length === 0 ? 'No qualified clients yet' : 'No clients match filters'}
                     </div>
                   ) : (
-                    filtered.map((client) => (
+                    <>
+                    {isTopMarginMode && (
+                      <div className="px-3 sm:px-4 py-2 bg-emerald-50 border-b border-emerald-100 text-xs sm:text-sm text-emerald-800 font-medium">
+                        Showing {withMargin.length} of {marginEligibleCount} margin-eligible clients ({profitMarginSort === 'top10' ? 'Top 10 by Profit Margin' : 'Top 25% by Profit Margin'})
+                      </div>
+                    )}
+                    {withMargin.map(({ client, profitMargin }) => (
                     <div
                       key={client.id}
                       onClick={() => {
@@ -2890,6 +2999,11 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                       </div>
                       <div className="text-xs sm:text-sm text-gray-600">{client.email}</div>
                       <div className="text-xs sm:text-sm text-gray-600">{client.phone}</div>
+                      {Number.isFinite(profitMargin) && (
+                        <div className="text-xs sm:text-sm text-green-700 font-medium mt-1">
+                          Profit Margin: {profitMargin.toFixed(1)}%
+                        </div>
+                      )}
                       {/* Product Badges */}
                       {allClientProducts[client.id] && allClientProducts[client.id].length > 0 && (
                         <div className="flex flex-wrap gap-1 mt-2">
@@ -2905,7 +3019,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                         </div>
                       )}
                     </div>
-                  ))
+                  ))}
+                  </>
                   );
                 })()}
               </div>
