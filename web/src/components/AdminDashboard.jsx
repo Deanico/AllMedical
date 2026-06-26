@@ -39,6 +39,30 @@ const formatDisplayDate = (value) => {
   return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
 }
 
+const PRIOR_AUTH_STATUS_META = {
+  requested: {
+    label: 'PA Requested',
+    className: 'bg-amber-100 text-amber-800'
+  },
+  approved: {
+    label: 'PA Approved',
+    className: 'bg-emerald-100 text-emerald-800'
+  },
+  denied: {
+    label: 'PA Denied',
+    className: 'bg-rose-100 text-rose-800'
+  }
+}
+
+const formatPriorAuthRange = (startDate, endDate) => {
+  if (!startDate && !endDate) return null
+  if (startDate && endDate) {
+    return `${formatDisplayDate(startDate)} - ${formatDisplayDate(endDate)}`
+  }
+  if (startDate) return `From ${formatDisplayDate(startDate)}`
+  return `Until ${formatDisplayDate(endDate)}`
+}
+
 export default function AdminDashboard({ userEmail, onLogout }) {
   const queueStatuses = ['pending', 'reviewed', 'ready_to_order', 'ordered']
   const [activeView, setActiveView] = useState('dashboard')
@@ -65,7 +89,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     zip_code: '',
     phone: ''
   })
-  const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', insurance: '', insurance_id: '', insurance_deductible: '', insurance_oop_max: '', birthday: '', address_line1: '', city: '', state: '', zip_code: '', shipping_duration: '', payment_status: '', is_paused: false })
+  const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', insurance: '', insurance_id: '', insurance_deductible: '', insurance_oop_max: '', birthday: '', address_line1: '', city: '', state: '', zip_code: '', shipping_duration: '', payment_status: '', prior_auth_status: '', prior_auth_start_date: '', prior_auth_end_date: '', is_paused: false })
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState(null)
   const [queueSyncing, setQueueSyncing] = useState(false)
@@ -1727,6 +1751,9 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         state: editForm.state,
         zip_code: editForm.zip_code,
         shipping_duration: editForm.shipping_duration || null,
+        prior_auth_status: editForm.prior_auth_status || null,
+        prior_auth_start_date: editForm.prior_auth_start_date || null,
+        prior_auth_end_date: editForm.prior_auth_end_date || null,
         is_paused: Boolean(editForm.is_paused)
       }
 
@@ -1743,7 +1770,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       
       setShowEditClientModal(false)
       await fetchLeads()
-      setSelectedClient({ ...selectedClient, ...editForm })
+      setSelectedClient({ ...selectedClient, ...updatePayload })
     } catch (error) {
       console.error('Error updating client:', error)
       alert('Failed to update client: ' + (error?.message || 'Unknown error'))
@@ -1780,6 +1807,9 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       zip_code: selectedClient.zip_code || '',
       shipping_duration: selectedClient.shipping_duration || '',
       payment_status: selectedClient.payment_status || '',
+      prior_auth_status: selectedClient.prior_auth_status || '',
+      prior_auth_start_date: selectedClient.prior_auth_start_date || '',
+      prior_auth_end_date: selectedClient.prior_auth_end_date || '',
       is_paused: Boolean(selectedClient.is_paused)
     })
     setShowEditClientModal(true)
@@ -2985,6 +3015,11 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                     >
                       <div className="font-semibold text-gray-900 text-sm sm:text-base">
                         {client.name}
+                        {client.prior_auth_status && PRIOR_AUTH_STATUS_META[client.prior_auth_status] && (
+                          <span className={`ml-2 inline-block px-2 py-0.5 text-xs rounded-full font-medium ${PRIOR_AUTH_STATUS_META[client.prior_auth_status].className}`}>
+                            {PRIOR_AUTH_STATUS_META[client.prior_auth_status].label}
+                          </span>
+                        )}
                         {client.is_paused && (
                           <span className="ml-2 inline-block px-2 py-0.5 text-xs rounded-full bg-yellow-100 text-yellow-800 font-medium">
                             Paused
@@ -2997,6 +3032,11 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                           </span>
                         )}
                       </div>
+                      {formatPriorAuthRange(client.prior_auth_start_date, client.prior_auth_end_date) && (
+                        <div className="text-xs sm:text-sm text-indigo-700 font-medium mt-1">
+                          PA Range: {formatPriorAuthRange(client.prior_auth_start_date, client.prior_auth_end_date)}
+                        </div>
+                      )}
                       <div className="text-xs sm:text-sm text-gray-600">{client.email}</div>
                       <div className="text-xs sm:text-sm text-gray-600">{client.phone}</div>
                       {Number.isFinite(profitMargin) && (
@@ -3161,6 +3201,24 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                             : 'N/A'}
                         </div>
                       </div>
+
+                      {(selectedClient.prior_auth_status || selectedClient.prior_auth_start_date || selectedClient.prior_auth_end_date) && (
+                        <div>
+                          <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                            Prior Auth
+                          </label>
+                          <div className="text-sm sm:text-base text-gray-900">
+                            {selectedClient.prior_auth_status && PRIOR_AUTH_STATUS_META[selectedClient.prior_auth_status]
+                              ? PRIOR_AUTH_STATUS_META[selectedClient.prior_auth_status].label
+                              : 'Status not set'}
+                          </div>
+                          {formatPriorAuthRange(selectedClient.prior_auth_start_date, selectedClient.prior_auth_end_date) && (
+                            <div className="text-xs sm:text-sm text-indigo-700 mt-1">
+                              {formatPriorAuthRange(selectedClient.prior_auth_start_date, selectedClient.prior_auth_end_date)}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -6473,6 +6531,45 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   <option value="partially_paying">Partially Paying</option>
                   <option value="not_paying_yet">Not Paying Yet</option>
                 </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Prior Auth Status
+                </label>
+                <select
+                  value={editForm.prior_auth_status}
+                  onChange={(e) => setEditForm({ ...editForm, prior_auth_status: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">None</option>
+                  <option value="requested">Requested</option>
+                  <option value="approved">Approved</option>
+                  <option value="denied">Denied</option>
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Prior Auth Start
+                  </label>
+                  <input
+                    type="date"
+                    value={editForm.prior_auth_start_date}
+                    onChange={(e) => setEditForm({ ...editForm, prior_auth_start_date: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Prior Auth End
+                  </label>
+                  <input
+                    type="date"
+                    value={editForm.prior_auth_end_date}
+                    onChange={(e) => setEditForm({ ...editForm, prior_auth_end_date: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
               </div>
               <div>
                 <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
