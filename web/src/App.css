@@ -1,2 +1,71 @@
-/* App styles - Tailwind handles all styling */
+.landing-shell {
+	background:
+		radial-gradient(circle at 0% 0%, rgba(14, 165, 233, 0.12), transparent 36%),
+		radial-gradient(circle at 100% 30%, rgba(16, 185, 129, 0.08), transparent 30%),
+		linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+}
+
+.landing-stat-card {
+	border: 1px solid rgba(148, 163, 184, 0.35);
+	background: rgba(255, 255, 255, 0.84);
+	border-radius: 12px;
+	padding: 0.9rem;
+	box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+}
+
+.landing-hero-media {
+	border-radius: 18px;
+	overflow: hidden;
+	border: 1px solid rgba(148, 163, 184, 0.28);
+	box-shadow: 0 26px 46px rgba(2, 6, 23, 0.15);
+	animation: liftIn 620ms ease both;
+}
+
+.landing-message-card {
+	border-radius: 16px;
+	border: 1px solid rgba(148, 163, 184, 0.3);
+	background: linear-gradient(120deg, rgba(255, 255, 255, 0.96), rgba(240, 249, 255, 0.95));
+	box-shadow: 0 15px 32px rgba(15, 23, 42, 0.08);
+}
+
+.landing-product-card {
+	border-radius: 16px;
+	border: 1px solid rgba(148, 163, 184, 0.26);
+	background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+	box-shadow: 0 14px 30px rgba(15, 23, 42, 0.07);
+	padding: 1.5rem;
+}
+
+.landing-form-shell {
+	border-radius: 18px;
+	border: 1px solid rgba(148, 163, 184, 0.34);
+	background: rgba(255, 255, 255, 0.9);
+	box-shadow: 0 20px 40px rgba(15, 23, 42, 0.1);
+}
+
+.landing-input {
+	width: 100%;
+	border-radius: 12px;
+	border: 1px solid rgba(148, 163, 184, 0.5);
+	background: #ffffff;
+	color: #0f172a;
+	padding: 0.8rem 0.95rem;
+}
+
+.landing-input:focus {
+	outline: none;
+	border-color: rgba(8, 145, 178, 0.75);
+	box-shadow: 0 0 0 3px rgba(8, 145, 178, 0.16);
+}
+
+@keyframes liftIn {
+	from {
+		opacity: 0;
+		transform: translateY(16px) scale(0.985);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0) scale(1);
+	}
+}
 

@@ -1,6 +1,63 @@
 import Docxtemplater from 'docxtemplater';
 import PizZip from 'pizzip';
 
+const PHYSICIAN_ORDER_SUPPLIER_CONFIG = {
+  all_medical: {
+    label: 'All Medical, LLC',
+    templateUrls: [
+      '/assets/Physician-order-template-all-medical.docx',
+      '/assets/Physician-order-template.docx.docx'
+    ],
+    brandingReplacements: [
+      ['SOLUTION8 MARKETING GROUP, LLC', 'ALL MEDICAL, LLC'],
+      ['NPI #: 1154271823', 'NPI #: 1407256191'],
+      ['NPI#: 1154271823', 'NPI#: 1407256191']
+    ]
+  },
+  solution8: {
+    label: 'Solution8 Marketing Group LLC',
+    templateUrls: [
+      '/assets/Physician-order-template.docx.docx',
+      '/assets/Physician-order-template-all-medical.docx'
+    ]
+  }
+};
+
+function applySupplierBranding(zip, supplier) {
+  const replacements = supplier?.brandingReplacements;
+  if (!Array.isArray(replacements) || replacements.length === 0) return;
+
+  const xmlFile = zip.file('word/document.xml');
+  if (!xmlFile) return;
+
+  let xml = xmlFile.asText();
+  for (const [from, to] of replacements) {
+    xml = xml.split(from).join(to);
+  }
+
+  zip.file('word/document.xml', xml);
+}
+
+async function fetchTemplateArrayBuffer(templateUrls = []) {
+  const attempted = [];
+
+  for (const templateUrl of templateUrls) {
+    try {
+      attempted.push(templateUrl);
+      const absoluteUrl = new URL(templateUrl, window.location.origin).toString();
+      const response = await fetch(absoluteUrl, { cache: 'no-store' });
+      if (!response.ok) {
+        continue;
+      }
+      return await response.arrayBuffer();
+    } catch (error) {
+      // Try the next fallback template URL.
+    }
+  }
+
+  throw new Error(`Could not load physician order template. Tried: ${attempted.join(', ')}`);
+}
+
 /**
  * Formats a phone number to XXX-XXX-XXXX format
  * @param {string} phone - Phone number (can include p:+1, spaces, etc.)
@@ -64,17 +121,22 @@ function cleanName(name) {
  * Generates a physician order document by filling in the Word template
  * @param {Object} patient - Patient information
  * @param {Object} doctor - Doctor information
+ * @param {string} supplierKey - Selected supplier template key
  * @returns {Promise<Blob>} - The filled document as a Word Blob
  */
-export async function generatePhysicianOrder(patient, doctor) {
+export async function generatePhysicianOrder(patient, doctor, supplierKey = 'solution8') {
   try {
-    // Fetch the Word template
-    const templateUrl = '/assets/Physician-order-template.docx.docx';
-    const response = await fetch(templateUrl);
-    const arrayBuffer = await response.arrayBuffer();
+    const supplier = PHYSICIAN_ORDER_SUPPLIER_CONFIG[supplierKey];
+    if (!supplier) {
+      throw new Error('Invalid supplier selected for physician order');
+    }
+
+    // Fetch the Word template (with fallbacks)
+    const arrayBuffer = await fetchTemplateArrayBuffer(supplier.templateUrls || []);
     
     // Load the template
     const zip = new PizZip(arrayBuffer);
+    applySupplierBranding(zip, supplier);
     const doc = new Docxtemplater(zip, {
       paragraphLoop: true,
       linebreaks: true,
@@ -160,6 +222,10 @@ export async function generatePhysicianOrder(patient, doctor) {
     }
     throw new Error('Failed to generate physician order: ' + error.message);
   }
+}
+
+export function getPhysicianOrderSupplierLabel(supplierKey) {
+  return PHYSICIAN_ORDER_SUPPLIER_CONFIG[supplierKey]?.label || 'Supplier';
 }
 
 /**

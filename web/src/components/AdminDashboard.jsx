@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabaseClient'
-import { generatePhysicianOrder, downloadPDF } from '../lib/generatePhysicianOrder'
+import { generatePhysicianOrder, downloadPDF, getPhysicianOrderSupplierLabel } from '../lib/generatePhysicianOrder'
 import { generateTreatmentRecords, getTreatmentRecordSupplierLabel } from '../lib/generateTreatmentRecords'
 import { generateHardshipForm } from '../lib/generateHardshipForm'
 import { calculateInsuranceProjection } from '../lib/insuranceProjection'
@@ -63,6 +63,105 @@ const formatPriorAuthRange = (startDate, endDate) => {
   return `Until ${formatDisplayDate(endDate)}`
 }
 
+const DashboardIcon = ({ name, className = 'h-5 w-5' }) => {
+  if (name === 'dashboard') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+        <path d="M3 13h8V3H3zM13 21h8v-6h-8zM13 3v6h8V3zM3 21h8v-4H3z" />
+      </svg>
+    )
+  }
+
+  if (name === 'leads') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+        <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+        <circle cx="8.5" cy="7" r="4" />
+        <path d="M20 8v6M17 11h6" />
+      </svg>
+    )
+  }
+
+  if (name === 'clients') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+        <circle cx="9" cy="7" r="4" />
+        <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+      </svg>
+    )
+  }
+
+  if (name === 'shipping') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+        <path d="M3 7h13v10H3z" />
+        <path d="M16 10h3l2 2v5h-5z" />
+        <circle cx="7.5" cy="17.5" r="1.5" />
+        <circle cx="18.5" cy="17.5" r="1.5" />
+      </svg>
+    )
+  }
+
+  if (name === 'products') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+        <path d="M20.59 13.41 12 22l-8.59-8.59A2 2 0 0 1 3 12V6a2 2 0 0 1 2-2h6a2 2 0 0 1 1.41.59z" />
+        <circle cx="7.5" cy="8.5" r="1" />
+      </svg>
+    )
+  }
+
+  if (name === 'calendar') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+        <rect x="3" y="4" width="18" height="18" rx="2" />
+        <path d="M16 2v4M8 2v4M3 10h18" />
+      </svg>
+    )
+  }
+
+  if (name === 'billing') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+        <path d="M12 1v22" />
+        <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+      </svg>
+    )
+  }
+
+  if (name === 'projects') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+        <rect x="3" y="3" width="18" height="18" rx="2" />
+        <path d="m8 12 2 2 5-5" />
+      </svg>
+    )
+  }
+
+  if (name === 'reports') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+        <path d="M3 3v18h18" />
+        <path d="M7 14v4M12 10v8M17 6v12" />
+      </svg>
+    )
+  }
+
+  if (name === 'sync') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+        <path d="M21 12a9 9 0 0 1-15.5 6.36" />
+        <path d="M3 12A9 9 0 0 1 18.5 5.64" />
+        <path d="M3 18v-5h5M21 6v5h-5" />
+      </svg>
+    )
+  }
+
+  return null
+}
+
 export default function AdminDashboard({ userEmail, onLogout }) {
   const queueStatuses = ['pending', 'reviewed', 'ready_to_order', 'ordered']
   const [activeView, setActiveView] = useState('dashboard')
@@ -92,6 +191,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', insurance: '', insurance_id: '', insurance_deductible: '', insurance_oop_max: '', birthday: '', address_line1: '', city: '', state: '', zip_code: '', shipping_duration: '', payment_status: '', prior_auth_status: '', prior_auth_start_date: '', prior_auth_end_date: '', is_paused: false })
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState(null)
+  const [portalInviteSending, setPortalInviteSending] = useState(false)
+  const [portalInviteMessage, setPortalInviteMessage] = useState(null)
   const [queueSyncing, setQueueSyncing] = useState(false)
   const [queueSyncResult, setQueueSyncResult] = useState(null)
   const [productNeeded, setProductNeeded] = useState('')
@@ -100,6 +201,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const [nppesResults, setNppesResults] = useState([])
   const [nppesLoading, setNppesLoading] = useState(false)
   const [showDoctorSelectModal, setShowDoctorSelectModal] = useState(false)
+  const [physicianOrderForm, setPhysicianOrderForm] = useState({ supplierKey: 'solution8' })
   const [generatingPDF, setGeneratingPDF] = useState(false)
   const [showTreatmentRecordModal, setShowTreatmentRecordModal] = useState(false)
   const [generatingTreatmentRecord, setGeneratingTreatmentRecord] = useState(false)
@@ -214,6 +316,54 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     const month = String(today.getMonth() + 1).padStart(2, '0')
     const day = String(today.getDate()).padStart(2, '0')
     return `${year}-${month}-${day}`
+  }
+
+  const getPortalAccessStatus = (client) => {
+    if (client?.portal_accepted_at) {
+      return {
+        label: 'Accepted (Created)',
+        className: 'bg-emerald-100 text-emerald-800'
+      }
+    }
+
+    if (client?.portal_invited_at) {
+      return {
+        label: 'Invited',
+        className: 'bg-amber-100 text-amber-800'
+      }
+    }
+
+    return {
+      label: 'Not Invited',
+      className: 'bg-slate-100 text-slate-700'
+    }
+  }
+
+  const getInsuranceReviewStatus = (client) => {
+    if (client?.insurance_update_review_status === 'pending') {
+      return { label: 'Pending Review', className: 'bg-amber-100 text-amber-800' }
+    }
+    if (client?.insurance_update_review_status === 'approved') {
+      return { label: 'Approved', className: 'bg-emerald-100 text-emerald-800' }
+    }
+    if (client?.insurance_update_review_status === 'rejected') {
+      return { label: 'Rejected', className: 'bg-rose-100 text-rose-800' }
+    }
+    return null
+  }
+
+  const getPhysicianOrderSupplierStatus = (client) => {
+    if (!client?.physician_order_supplier) {
+      return {
+        label: 'Not recorded (legacy)',
+        className: 'bg-slate-100 text-slate-700'
+      }
+    }
+
+    return {
+      label: getPhysicianOrderSupplierLabel(client.physician_order_supplier),
+      className: 'bg-indigo-100 text-indigo-800'
+    }
   }
 
   const getClientProfitMargin = (client) => {
@@ -558,6 +708,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       fetchDoctors(selectedClient.id)
       fetchClientProducts(selectedClient.id)
       setProductNeeded(selectedClient.product_needed || '')
+      setPortalInviteMessage(null)
       // Reset calculator editing state when switching clients
       setEditingCalculator(false)
       // Load calculator data if it exists
@@ -1616,42 +1767,79 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const handleGeneratePhysicianOrder = async (doctor = null) => {
     if (!selectedClient) return
 
-    // If no doctor specified and multiple doctors exist, show selection modal
-    if (!doctor && doctors.length > 1) {
+    if (!doctor) {
       setShowDoctorSelectModal(true)
       return
     }
 
-    // Use the provided doctor or the first one if only one exists
     const selectedDoctor = doctor || doctors[0]
 
     setGeneratingPDF(true)
     try {
       // Generate the document
-      const docBlob = await generatePhysicianOrder(selectedClient, selectedDoctor)
+      const docBlob = await generatePhysicianOrder(
+        selectedClient,
+        selectedDoctor,
+        physicianOrderForm.supplierKey
+      )
       
       // Create filename with patient name and date
       const patientName = selectedClient.name.replace(/[^a-z0-9]/gi, '_')
       const dateStr = new Date().toISOString().split('T')[0]
-      const fileName = `Physician_Order_${patientName}_${dateStr}.docx`
+      const supplierLabel = getPhysicianOrderSupplierLabel(physicianOrderForm.supplierKey).replace(/\s+/g, '_')
+      const fileName = `Physician_Order_${supplierLabel}_${patientName}_${dateStr}.docx`
       
       // Download the document
       downloadPDF(docBlob, fileName)
       
+      const generatedAt = new Date().toISOString()
+
       // Update database to track that physician order was generated
       if (supabase) {
-        await supabase
+        const updatePayload = {
+          physician_order_generated_at: generatedAt,
+          physician_order_supplier: physicianOrderForm.supplierKey
+        }
+
+        const { error: updateError } = await supabase
           .from('leads')
-          .update({ 
-            physician_order_generated_at: new Date().toISOString()
-          })
+          .update(updatePayload)
           .eq('id', selectedClient.id)
+
+        if (updateError) {
+          const missingSupplierColumn =
+            updateError.code === 'PGRST204' ||
+            updateError.code === '42703' ||
+            /physician_order_supplier/i.test(updateError.message || '')
+
+          if (!missingSupplierColumn) {
+            throw updateError
+          }
+
+          // Graceful fallback when migration has not yet been run.
+          const { error: fallbackError } = await supabase
+            .from('leads')
+            .update({ physician_order_generated_at: generatedAt })
+            .eq('id', selectedClient.id)
+
+          if (fallbackError) throw fallbackError
+        }
         
         // Update local state
         setSelectedClient({
           ...selectedClient,
-          physician_order_generated_at: new Date().toISOString()
+          physician_order_generated_at: generatedAt,
+          physician_order_supplier: physicianOrderForm.supplierKey
         })
+        setLeads((prevLeads) => prevLeads.map((lead) =>
+          lead.id === selectedClient.id
+            ? {
+                ...lead,
+                physician_order_generated_at: generatedAt,
+                physician_order_supplier: physicianOrderForm.supplierKey
+              }
+            : lead
+        ))
         await fetchLeads()
       }
       
@@ -1813,6 +2001,138 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       is_paused: Boolean(selectedClient.is_paused)
     })
     setShowEditClientModal(true)
+  }
+
+  const handleSendPortalInvite = async () => {
+    if (!supabase || !selectedClient?.email) {
+      setPortalInviteMessage({ type: 'error', text: 'Client must have an email address to receive a portal invite.' })
+      return
+    }
+
+    try {
+      setPortalInviteSending(true)
+      setPortalInviteMessage(null)
+
+      const inviteTimestamp = new Date().toISOString()
+      const redirectTo = `${window.location.origin}/portal`
+      const { error } = await supabase.auth.signInWithOtp({
+        email: selectedClient.email,
+        options: {
+          shouldCreateUser: true,
+          emailRedirectTo: redirectTo,
+          data: {
+            full_name: selectedClient.name || ''
+          }
+        }
+      })
+
+      if (error) throw error
+
+      const { error: updateError } = await supabase
+        .from('leads')
+        .update({ portal_invited_at: inviteTimestamp })
+        .eq('id', selectedClient.id)
+
+      if (!updateError) {
+        const updatedClient = {
+          ...selectedClient,
+          portal_invited_at: inviteTimestamp
+        }
+
+        setSelectedClient(updatedClient)
+        setLeads(prevLeads => prevLeads.map(lead => (
+          lead.id === selectedClient.id
+            ? { ...lead, portal_invited_at: inviteTimestamp }
+            : lead
+        )))
+      }
+
+      setPortalInviteMessage({
+        type: 'success',
+        text: updateError
+          ? `Portal invite sent to ${selectedClient.email}. Apply portal tracking migration to enable status timestamps.`
+          : `Portal invite sent to ${selectedClient.email}`
+      })
+    } catch (error) {
+      console.error('Error sending portal invite:', error)
+      setPortalInviteMessage({
+        type: 'error',
+        text: error?.message || 'Failed to send portal invite.'
+      })
+    } finally {
+      setPortalInviteSending(false)
+    }
+  }
+
+  const handleApproveInsuranceUpdate = async () => {
+    if (!supabase || !selectedClient || selectedClient.insurance_update_review_status !== 'pending') return
+
+    try {
+      setUpdating(true)
+
+      const reviewedAt = new Date().toISOString()
+      const updatePayload = {
+        insurance: selectedClient.pending_insurance_provider || selectedClient.insurance,
+        insurance_id: selectedClient.pending_insurance_member_id || selectedClient.insurance_id || null,
+        insurance_group_number: selectedClient.pending_insurance_group_number || null,
+        insurance_update_review_status: 'approved',
+        insurance_update_reviewed_at: reviewedAt,
+        pending_insurance_provider: null,
+        pending_insurance_member_id: null,
+        pending_insurance_group_number: null
+      }
+
+      const { error } = await supabase
+        .from('leads')
+        .update(updatePayload)
+        .eq('id', selectedClient.id)
+
+      if (error) throw error
+
+      const updatedClient = { ...selectedClient, ...updatePayload }
+      setSelectedClient(updatedClient)
+      setLeads(prev => prev.map(lead => (lead.id === selectedClient.id ? { ...lead, ...updatePayload } : lead)))
+      alert('Insurance update approved and applied.')
+    } catch (error) {
+      console.error('Error approving insurance update:', error)
+      alert('Failed to approve insurance update: ' + (error?.message || 'Unknown error'))
+    } finally {
+      setUpdating(false)
+    }
+  }
+
+  const handleRejectInsuranceUpdate = async () => {
+    if (!supabase || !selectedClient || selectedClient.insurance_update_review_status !== 'pending') return
+
+    try {
+      setUpdating(true)
+
+      const reviewedAt = new Date().toISOString()
+      const updatePayload = {
+        insurance_update_review_status: 'rejected',
+        insurance_update_reviewed_at: reviewedAt,
+        pending_insurance_provider: null,
+        pending_insurance_member_id: null,
+        pending_insurance_group_number: null
+      }
+
+      const { error } = await supabase
+        .from('leads')
+        .update(updatePayload)
+        .eq('id', selectedClient.id)
+
+      if (error) throw error
+
+      const updatedClient = { ...selectedClient, ...updatePayload }
+      setSelectedClient(updatedClient)
+      setLeads(prev => prev.map(lead => (lead.id === selectedClient.id ? { ...lead, ...updatePayload } : lead)))
+      alert('Insurance update rejected.')
+    } catch (error) {
+      console.error('Error rejecting insurance update:', error)
+      alert('Failed to reject insurance update: ' + (error?.message || 'Unknown error'))
+    } finally {
+      setUpdating(false)
+    }
   }
 
   const handleMarkPhysicianOrderSent = async () => {
@@ -2322,27 +2642,32 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
   // Navigation items
   const navigation = [
-    { id: 'dashboard', name: 'Dashboard', icon: '📊' },
-    { id: 'leads', name: 'Leads', icon: '👤', badge: leads.length },
-    { id: 'clients', name: 'Clients', icon: '👥', badge: activeQualifiedLeads.length },
-    { id: 'shipping', name: 'Shipping', icon: '📦' },
-    { id: 'products', name: 'Products', icon: '🏷️' },
-    { id: 'calendar', name: 'Calendar', icon: '📅' },
-    { id: 'billing', name: 'Billing', icon: '💰' },
-    { id: 'projects', name: 'Projects & Tasks', icon: '✓' },
-    { id: 'reports', name: 'Reports', icon: '📈' },
+    { id: 'dashboard', name: 'Dashboard', icon: 'dashboard' },
+    { id: 'leads', name: 'Leads', icon: 'leads', badge: leads.length },
+    { id: 'clients', name: 'Clients', icon: 'clients', badge: activeQualifiedLeads.length },
+    { id: 'shipping', name: 'Shipping', icon: 'shipping' },
+    { id: 'products', name: 'Products', icon: 'products' },
+    { id: 'calendar', name: 'Calendar', icon: 'calendar' },
+    { id: 'billing', name: 'Billing', icon: 'billing' },
+    { id: 'projects', name: 'Projects & Tasks', icon: 'projects' },
+    { id: 'reports', name: 'Reports', icon: 'reports' },
   ]
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
+    <div className="admin-shell min-h-screen flex">
       {/* Sidebar */}
-      <div className={`${sidebarCollapsed ? 'w-16' : 'w-64'} bg-white border-r border-gray-200 transition-all duration-300 flex flex-col`}>
+      <div className={`${sidebarCollapsed ? 'w-16' : 'w-64'} admin-sidebar border-r transition-all duration-300 flex flex-col`}>
         {/* Logo & Toggle */}
-        <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-          {!sidebarCollapsed && <h1 className="text-xl font-bold text-red-600">AllMedical</h1>}
+        <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+          {!sidebarCollapsed && (
+            <div>
+              <h1 className="text-xl font-extrabold tracking-tight text-white">AllMedical</h1>
+              <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400 mt-1">Operations</p>
+            </div>
+          )}
           <button 
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className="p-2 hover:bg-gray-100 rounded-lg"
+            className="p-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
           >
             {sidebarCollapsed ? '→' : '←'}
           </button>
@@ -2364,16 +2689,16 @@ export default function AdminDashboard({ userEmail, onLogout }) {
               }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors ${
                 activeView === item.id
-                  ? 'bg-blue-50 text-blue-700 font-medium'
-                  : 'text-gray-700 hover:bg-gray-50'
+                  ? 'bg-slate-100 text-slate-900 font-semibold'
+                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
               }`}
             >
-              <span className="text-xl">{item.icon}</span>
+              <DashboardIcon name={item.icon} className="h-5 w-5 shrink-0" />
               {!sidebarCollapsed && (
                 <>
-                  <span className="flex-1">{item.name}</span>
+                  <span className="flex-1 text-sm tracking-wide">{item.name}</span>
                   {item.badge !== undefined && (
-                    <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-xs font-semibold">
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${activeView === item.id ? 'bg-slate-800 text-slate-100' : 'bg-slate-700 text-slate-200'}`}>
                       {item.badge}
                     </span>
                   )}
@@ -2384,13 +2709,13 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         </nav>
 
         {/* User Info & Logout */}
-        <div className="p-4 border-t border-gray-200">
+        <div className="p-4 border-t border-slate-800">
           {!sidebarCollapsed && (
-            <div className="text-sm text-gray-600 mb-2 truncate">{userEmail}</div>
+            <div className="text-sm text-slate-400 mb-2 truncate">{userEmail}</div>
           )}
           <button
             onClick={onLogout}
-            className="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 px-3 py-2 rounded-lg text-sm font-medium"
+            className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
           >
             {sidebarCollapsed ? '⎋' : 'Logout'}
           </button>
@@ -2398,19 +2723,20 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto admin-main">
         {/* Header */}
-        <div className="bg-white border-b border-gray-200 px-6 py-4">
+        <div className="admin-header px-6 py-4">
           <div className="flex justify-between items-center">
-            <h2 className="text-2xl font-bold text-gray-900">
+            <h2 className="text-2xl font-bold tracking-tight text-slate-900">
               {navigation.find(n => n.id === activeView)?.name || 'Dashboard'}
             </h2>
             <button
               onClick={handleSyncFromSheets}
               disabled={syncing}
-              className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white px-4 py-2 rounded-md text-sm font-medium"
+              className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
             >
-              {syncing ? 'Syncing...' : '↻ Sync from Google Sheets'}
+              <DashboardIcon name="sync" className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
+              {syncing ? 'Syncing...' : 'Sync from Google Sheets'}
             </button>
           </div>
         </div>
@@ -2452,41 +2778,41 @@ export default function AdminDashboard({ userEmail, onLogout }) {
               {/* Metrics Cards */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 {/* Pending Shipments */}
-                <div className="bg-white rounded-lg shadow p-6">
+                <div className="admin-card p-6">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-gray-600">Pending Shipments</p>
-                      <p className="text-3xl font-bold text-gray-900 mt-2">{pendingOrders.filter(o => o.status === 'pending').length}</p>
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Pending Shipments</p>
+                      <p className="text-3xl font-extrabold text-slate-900 mt-2">{pendingOrders.filter(o => o.status === 'pending').length}</p>
                     </div>
-                    <div className="bg-blue-100 rounded-full p-3">
-                      <span className="text-2xl">📦</span>
+                    <div className="h-12 w-12 rounded-2xl bg-sky-100 text-sky-700 flex items-center justify-center">
+                      <DashboardIcon name="shipping" className="h-6 w-6" />
                     </div>
                   </div>
-                  <p className="text-sm text-gray-500 mt-4">Orders awaiting processing</p>
+                  <p className="text-sm text-slate-500 mt-4">Orders awaiting processing</p>
                 </div>
 
                 {/* Active Clients */}
-                <div className="bg-white rounded-lg shadow p-6">
+                <div className="admin-card p-6">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-gray-600">Active Clients</p>
-                      <p className="text-3xl font-bold text-gray-900 mt-2">{activeQualifiedLeads.length}</p>
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Active Clients</p>
+                      <p className="text-3xl font-extrabold text-slate-900 mt-2">{activeQualifiedLeads.length}</p>
                     </div>
-                    <div className="bg-green-100 rounded-full p-3">
-                      <span className="text-2xl">👥</span>
+                    <div className="h-12 w-12 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                      <DashboardIcon name="clients" className="h-6 w-6" />
                     </div>
                   </div>
-                  <p className="text-sm text-gray-500 mt-4">
+                  <p className="text-sm text-slate-500 mt-4">
                     {leads.length - qualifiedLeads.length} leads in pipeline
                   </p>
                 </div>
 
                 {/* Monthly Revenue */}
-                <div className="bg-white rounded-lg shadow p-6">
+                <div className="admin-card p-6">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-gray-600">Monthly Revenue</p>
-                      <p className="text-3xl font-bold text-gray-900 mt-2">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Monthly Revenue</p>
+                      <p className="text-3xl font-extrabold text-slate-900 mt-2">
                         ${(() => {
                           const totalYearlyNetProfit = activeQualifiedLeads.reduce((total, client) => {
                             if (!client.calc_deductible || !client.calc_insurance_paid || !client.calc_percent_allowable || !client.calc_product_cost) {
@@ -2508,30 +2834,30 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                         })()}
                       </p>
                     </div>
-                    <div className="bg-purple-100 rounded-full p-3">
-                      <span className="text-2xl">💰</span>
+                    <div className="h-12 w-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center">
+                      <DashboardIcon name="billing" className="h-6 w-6" />
                     </div>
                   </div>
-                  <p className="text-sm text-gray-500 mt-4">Estimated insurance revenue</p>
+                  <p className="text-sm text-slate-500 mt-4">Estimated insurance revenue</p>
                 </div>
 
                 {/* Items Due Today */}
-                <div className="bg-white rounded-lg shadow p-6">
+                <div className="admin-card p-6">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-gray-600">Items Due Today</p>
-                      <p className="text-3xl font-bold text-gray-900 mt-2">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Items Due Today</p>
+                      <p className="text-3xl font-extrabold text-slate-900 mt-2">
                         {pendingOrders.filter(o => {
                           const today = new Date().toISOString().split('T')[0]
                           return o.ship_date === today && o.status === 'pending'
                         }).length}
                       </p>
                     </div>
-                    <div className="bg-orange-100 rounded-full p-3">
-                      <span className="text-2xl">⚡</span>
+                    <div className="h-12 w-12 rounded-2xl bg-orange-100 text-orange-700 flex items-center justify-center">
+                      <DashboardIcon name="calendar" className="h-6 w-6" />
                     </div>
                   </div>
-                  <p className="text-sm text-gray-500 mt-4">Urgent shipments</p>
+                  <p className="text-sm text-slate-500 mt-4">Urgent shipments</p>
                 </div>
               </div>
 
@@ -3031,6 +3357,17 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                              !client.address_line1 ? 'Address Needed!' : 'DOB Needed!'}
                           </span>
                         )}
+                        {getInsuranceReviewStatus(client) && (
+                          <span className={`ml-2 inline-block px-2 py-0.5 text-xs rounded-full font-medium ${getInsuranceReviewStatus(client).className}`}>
+                            {getInsuranceReviewStatus(client).label}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1 flex items-center gap-2 text-xs sm:text-sm">
+                        <span className="text-slate-500 font-medium">Portal Access:</span>
+                        <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${getPortalAccessStatus(client).className}`}>
+                          {getPortalAccessStatus(client).label}
+                        </span>
                       </div>
                       {formatPriorAuthRange(client.prior_auth_start_date, client.prior_auth_end_date) && (
                         <div className="text-xs sm:text-sm text-indigo-700 font-medium mt-1">
@@ -3092,13 +3429,28 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                         </span>
                       )}
                     </div>
-                    <button
-                      onClick={openEditModal}
-                      className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm"
-                    >
-                      Edit
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handleSendPortalInvite}
+                        disabled={portalInviteSending || !selectedClient.email}
+                        className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 text-white px-3 py-1.5 rounded text-sm"
+                      >
+                        {portalInviteSending ? 'Sending Invite...' : 'Send Portal Invite'}
+                      </button>
+                      <button
+                        onClick={openEditModal}
+                        className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm"
+                      >
+                        Edit
+                      </button>
+                    </div>
                   </div>
+
+                  {portalInviteMessage && (
+                    <div className={`rounded-md border px-3 py-2 text-sm ${portalInviteMessage.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'}`}>
+                      {portalInviteMessage.text}
+                    </div>
+                  )}
 
                   {/* Two Column Layout for Basic Info */}
                   <div className="grid md:grid-cols-2 gap-4 sm:gap-6">
@@ -3170,6 +3522,15 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                         </div>
                       )}
 
+                      {selectedClient.insurance_group_number && (
+                        <div>
+                          <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                            Group #
+                          </label>
+                          <div className="text-sm sm:text-base text-gray-900">{selectedClient.insurance_group_number}</div>
+                        </div>
+                      )}
+
                       {(selectedClient.insurance_deductible != null || selectedClient.insurance_oop_max != null) && (
                         <div className="grid grid-cols-2 gap-3">
                           {selectedClient.insurance_deductible != null && (
@@ -3219,11 +3580,71 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                           )}
                         </div>
                       )}
+
+                      <div>
+                        <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                          Portal Access
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${getPortalAccessStatus(selectedClient).className}`}>
+                            {getPortalAccessStatus(selectedClient).label}
+                          </span>
+                        </div>
+                        {selectedClient.portal_invited_at && (
+                          <div className="text-xs text-slate-500 mt-1">Invited: {formatDate(selectedClient.portal_invited_at)}</div>
+                        )}
+                        {selectedClient.portal_accepted_at && (
+                          <div className="text-xs text-slate-500">Accepted: {formatDate(selectedClient.portal_accepted_at)}</div>
+                        )}
+                      </div>
                     </div>
                   </div>
 
                   {/* Full Width Fields */}
                   <div className="space-y-4 border-t pt-4">
+                    {selectedClient.insurance_update_review_status === 'pending' && (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                          <div>
+                            <p className="text-sm font-semibold text-amber-900">Insurance Update Request Pending</p>
+                            {selectedClient.insurance_update_requested_at && (
+                              <p className="text-xs text-amber-700 mt-1">Requested: {formatDate(selectedClient.insurance_update_requested_at)}</p>
+                            )}
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={handleApproveInsuranceUpdate}
+                              disabled={updating}
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 text-white rounded text-xs font-semibold"
+                            >
+                              Approve
+                            </button>
+                            <button
+                              onClick={handleRejectInsuranceUpdate}
+                              disabled={updating}
+                              className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 disabled:bg-gray-400 text-white rounded text-xs font-semibold"
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        </div>
+                        <div className="mt-3 grid sm:grid-cols-3 gap-3 text-xs sm:text-sm">
+                          <div>
+                            <p className="font-medium text-amber-800">Requested Insurance</p>
+                            <p className="text-amber-900">{selectedClient.pending_insurance_provider || 'N/A'}</p>
+                          </div>
+                          <div>
+                            <p className="font-medium text-amber-800">Requested Member ID</p>
+                            <p className="text-amber-900">{selectedClient.pending_insurance_member_id || 'N/A'}</p>
+                          </div>
+                          <div>
+                            <p className="font-medium text-amber-800">Requested Group #</p>
+                            <p className="text-amber-900">{selectedClient.pending_insurance_group_number || 'N/A'}</p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Product Needed
@@ -3551,6 +3972,11 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                             </svg>
                             Physician Order Status
                           </h4>
+                          <div className="mb-3">
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${getPhysicianOrderSupplierStatus(selectedClient).className}`}>
+                              Supplier: {getPhysicianOrderSupplierStatus(selectedClient).label}
+                            </span>
+                          </div>
                           
                           <div className="space-y-3">
                             {/* Generated */}
@@ -3561,7 +3987,9 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                                 </svg>
                               </div>
                               <div className="flex-1">
-                                <div className="font-medium text-gray-900">Generated</div>
+                                <div className="font-medium text-gray-900">
+                                  Generated {selectedClient.physician_order_supplier ? `(${getPhysicianOrderSupplierLabel(selectedClient.physician_order_supplier)})` : ''}
+                                </div>
                                 <div className="text-sm text-gray-600">
                                   {formatDate(selectedClient.physician_order_generated_at)}
                                 </div>
@@ -4574,7 +5002,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
               {/* Expense Management Section */}
               <div className="bg-white rounded-lg shadow p-4 sm:p-6">
                 <div className="flex justify-between items-center mb-6">
-                  <h2 className="text-2xl font-bold text-gray-900">💸 Expense Management</h2>
+                  <h2 className="text-2xl font-bold text-gray-900">Expense Management</h2>
                   <button
                     onClick={() => setShowAddExpenseModal(true)}
                     className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md text-sm font-medium"
@@ -5097,7 +5525,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
               <>
                 <div className="bg-white rounded-lg shadow p-6">
                   <div className="flex justify-between items-center mb-6">
-                    <h2 className="text-2xl font-bold text-gray-900">📁 Projects</h2>
+                    <h2 className="text-2xl font-bold text-gray-900">Projects</h2>
                     <button
                       onClick={() => {
                         setProjectForm({ name: '', description: '', deadline: '', goal: '' })
@@ -5115,7 +5543,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                       className="border-2 border-gray-200 rounded-lg p-4 hover:border-blue-400 transition-colors cursor-pointer"
                     >
                       <div className="flex justify-between items-start mb-3">
-                        <h3 className="text-lg font-bold text-gray-900">📂 All Tasks</h3>
+                        <h3 className="text-lg font-bold text-gray-900">All Tasks</h3>
                         <span className="px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-700">
                           {tasks.length} total
                         </span>
@@ -6761,10 +7189,24 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       {showDoctorSelectModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <h3 className="text-xl font-bold text-gray-900 mb-4">Select Doctor</h3>
+            <h3 className="text-xl font-bold text-gray-900 mb-4">Generate Physician Order</h3>
             <p className="text-sm text-gray-600 mb-4">
-              Choose which doctor to use for the physician order:
+              Choose the supplier and doctor to use for the physician order:
             </p>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Supplier</label>
+              <select
+                value={physicianOrderForm.supplierKey}
+                onChange={(e) => setPhysicianOrderForm({ ...physicianOrderForm, supplierKey: e.target.value })}
+                disabled={generatingPDF}
+                className="w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+              >
+                <option value="all_medical">All Medical, LLC</option>
+                <option value="solution8">Solution8 Marketing Group LLC</option>
+              </select>
+            </div>
+
             <div className="space-y-3 max-h-96 overflow-y-auto mb-6">
               {doctors.map((doctor) => (
                 <button

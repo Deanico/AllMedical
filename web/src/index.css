@@ -1,6 +1,15 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  --app-bg: #f2f4f8;
+  --sidebar-bg: linear-gradient(180deg, #0a1324 0%, #08101e 100%);
+  --card-border: rgba(15, 23, 42, 0.08);
+  --card-shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
+}
 
 * {
   margin: 0;
@@ -13,9 +22,191 @@ html {
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  font-family: 'Manrope', 'Segoe UI', sans-serif;
+  background: radial-gradient(circle at top right, #ffffff 0%, var(--app-bg) 58%, #eef2f7 100%);
+  color: #0f172a;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.admin-shell {
+  background: transparent;
+}
+
+.admin-sidebar {
+  background: var(--sidebar-bg);
+  border-color: rgba(148, 163, 184, 0.18);
+}
+
+.admin-main {
+  background: transparent;
+}
+
+.admin-header {
+  background: rgba(255, 255, 255, 0.78);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.35);
+  backdrop-filter: blur(10px);
+}
+
+.admin-card {
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
+  border: 1px solid var(--card-border);
+  box-shadow: var(--card-shadow);
+  border-radius: 16px;
+}
+
+.admin-shell .bg-white.rounded-lg.shadow {
+  border: 1px solid var(--card-border);
+  box-shadow: var(--card-shadow);
+  border-radius: 16px;
+}
+
+.admin-shell .bg-white.rounded-lg.shadow.overflow-hidden,
+.admin-shell .bg-white.rounded-lg.shadow.p-4,
+.admin-shell .bg-white.rounded-lg.shadow.p-6 {
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
+}
+
+.admin-shell .border-gray-200 {
+  border-color: rgba(148, 163, 184, 0.3) !important;
+}
+
+.admin-shell .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgba(148, 163, 184, 0.24) !important;
+}
+
+.admin-shell .bg-gray-50 {
+  background-color: #f8fafc !important;
+}
+
+.admin-shell .hover\:bg-gray-50:hover {
+  background-color: #f1f5f9 !important;
+}
+
+.admin-shell .text-gray-900 {
+  color: #0f172a !important;
+}
+
+.admin-shell .text-gray-800 {
+  color: #1e293b !important;
+}
+
+.admin-shell .text-gray-700 {
+  color: #334155 !important;
+}
+
+.admin-shell .text-gray-600,
+.admin-shell .text-gray-500 {
+  color: #475569 !important;
+}
+
+.admin-shell input[type='text'],
+.admin-shell input[type='number'],
+.admin-shell input[type='date'],
+.admin-shell input[type='email'],
+.admin-shell input[type='tel'],
+.admin-shell select,
+.admin-shell textarea {
+  background-color: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  border-radius: 10px;
+  color: #0f172a;
+}
+
+.admin-shell input[type='text']:focus,
+.admin-shell input[type='number']:focus,
+.admin-shell input[type='date']:focus,
+.admin-shell input[type='email']:focus,
+.admin-shell input[type='tel']:focus,
+.admin-shell select:focus,
+.admin-shell textarea:focus {
+  outline: none;
+  border-color: rgba(14, 116, 144, 0.85);
+  box-shadow: 0 0 0 3px rgba(14, 116, 144, 0.12);
+}
+
+.admin-shell table thead {
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+}
+
+.admin-shell table tbody tr {
+  transition: background-color 160ms ease;
+}
+
+.admin-shell .rounded-full.bg-gray-200,
+.admin-shell .w-full.bg-gray-200 {
+  background-color: #dbe3ee !important;
+}
+
+.admin-shell button {
+  transition: background-color 160ms ease, color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.portal-shell {
+  background: radial-gradient(circle at 10% 20%, #f8fafc 0%, #eef2f7 55%, #e2e8f0 100%);
+}
+
+.portal-auth-card {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 18px;
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.08);
+}
+
+.portal-info-card {
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 14px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+}
+
+.portal-row-card {
+  background-color: rgba(248, 250, 252, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 12px;
+}
+
+.portal-primary-btn {
+  background: linear-gradient(135deg, #0f766e 0%, #0f766e 20%, #0b5f8a 100%);
+  color: #ffffff;
+  border: 0;
+  border-radius: 10px;
+  font-weight: 700;
+  padding: 0.8rem 1rem;
+}
+
+.portal-primary-btn:hover {
+  filter: brightness(1.03);
+}
+
+.portal-primary-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.portal-secondary-btn {
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  border-radius: 10px;
+  background: #ffffff;
+  color: #1e293b;
+  font-weight: 600;
+  padding: 0.6rem 0.9rem;
+}
+
+.portal-secondary-btn:hover {
+  background: #f8fafc;
+}
+
+.portal-link-btn {
+  color: #0f766e;
+  font-weight: 600;
+  padding: 0.6rem 0.2rem;
+}
+
+.portal-link-btn:hover {
+  color: #0b5f8a;
 }
