@@ -2,7 +2,7 @@
 -- Adds days_per_unit, default_90_day_qty, hcpcs to products table
 -- Adds last_ship_date to client_products table
 -- Deactivates removed products (test strips, patches, wipes, TruSteel, Sure-T, Silhouette, Quick Set)
--- Sets frequency_days on client_products to 88 (90 days minus 2-day shipping buffer)
+-- Sets frequency_days on client_products to 83 (90 days minus 7-day shipping buffer)
 
 BEGIN;
 
@@ -136,12 +136,12 @@ UPDATE products SET active = false
 WHERE name ILIKE '%quick%set%' OR name ILIKE '%quickset%';
 
 -- ============================================================
--- 5. Update client_products.frequency_days to 88 (90 − 2 buffer)
+-- 5. Update client_products.frequency_days to 83 (90 − 7 buffer)
 --    for all active assignments so existing schedules stay in sync
 -- ============================================================
 UPDATE client_products
-SET frequency_days = 88
-WHERE active = true AND frequency_days != 88;
+SET frequency_days = 83
+WHERE active = true AND frequency_days != 83;
 
 -- ============================================================
 -- 6. Indexes

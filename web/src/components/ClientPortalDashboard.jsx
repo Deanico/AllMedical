@@ -12,11 +12,31 @@ const formatDate = (value) => {
   })
 }
 
-export default function ClientPortalDashboard({ user, onLogout }) {
+const ORDER_STATUS_META = {
+  pending: { label: 'Pending', className: 'bg-amber-100 text-amber-800' },
+  reviewed: { label: 'Reviewed', className: 'bg-sky-100 text-sky-800' },
+  ready_to_order: { label: 'Ready to Order', className: 'bg-cyan-100 text-cyan-800' },
+  ordered: { label: 'Ordered', className: 'bg-indigo-100 text-indigo-800' },
+  shipped: { label: 'Shipped', className: 'bg-emerald-100 text-emerald-800' },
+  cancelled: { label: 'Cancelled', className: 'bg-rose-100 text-rose-800' }
+}
+
+const formatOrderStatus = (status) => {
+  if (!status) return 'Unknown'
+  return ORDER_STATUS_META[status]?.label || status.replace(/_/g, ' ')
+}
+
+const formatTrackingNumber = (value) => {
+  if (!value) return 'Not assigned yet'
+  return value
+}
+
+export default function ClientPortalDashboard({ user, onLogout, previewMode = false }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [client, setClient] = useState(null)
   const [clientProducts, setClientProducts] = useState([])
+  const [clientOrders, setClientOrders] = useState([])
   const [showPasswordSetup, setShowPasswordSetup] = useState(false)
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -65,6 +85,7 @@ export default function ClientPortalDashboard({ user, onLogout }) {
           if (!cancelled) {
             setClient(null)
             setClientProducts([])
+            setClientOrders([])
             setError('Your login is active, but your client account is not linked yet. Please contact support.')
           }
           return
@@ -111,9 +132,40 @@ export default function ClientPortalDashboard({ user, onLogout }) {
 
         if (productsError) throw productsError
 
+        const { data: ordersData, error: ordersError } = await supabase
+          .from('pending_orders')
+          .select(`
+            id,
+            ship_date,
+            status,
+            tracking_number,
+            order_placed_at,
+            shipped_at,
+            notes,
+            created_at,
+            updated_at,
+            order_details,
+            pending_order_items (
+              id,
+              quantity,
+              products (
+                id,
+                name,
+                category,
+                manufacturer
+              )
+            )
+          `)
+          .eq('lead_id', matchedClient.id)
+          .order('ship_date', { ascending: false })
+          .order('created_at', { ascending: false })
+
+        if (ordersError) throw ordersError
+
         if (!cancelled) {
           setClient(resolvedClient)
           setClientProducts(productsData || [])
+          setClientOrders(ordersData || [])
         }
       } catch (fetchError) {
         if (!cancelled) {
@@ -140,6 +192,19 @@ export default function ClientPortalDashboard({ user, onLogout }) {
     const upcoming = clientProducts.find((item) => item.next_ship_date && item.next_ship_date >= todayKey)
     return upcoming || clientProducts[0]
   }, [clientProducts])
+
+  const activeOrder = useMemo(() => {
+    if (clientOrders.length === 0) return null
+
+    const activeStatuses = new Set(['pending', 'reviewed', 'ready_to_order', 'ordered'])
+    return clientOrders.find((order) => activeStatuses.has(order.status)) || clientOrders[0]
+  }, [clientOrders])
+
+  const completedOrders = useMemo(() => {
+    if (clientOrders.length === 0) return []
+
+    return clientOrders.filter((order) => order.id !== activeOrder?.id)
+  }, [activeOrder, clientOrders])
 
   useEffect(() => {
     if (!client) return
@@ -310,33 +375,38 @@ export default function ClientPortalDashboard({ user, onLogout }) {
             <p className="text-xs uppercase tracking-[0.18em] text-slate-500 font-semibold">Client Portal</p>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight mt-1">Welcome{client?.name ? `, ${client.name}` : ''}</h1>
             <p className="text-sm text-slate-600 mt-2">Review your next shipment and product schedule in one place.</p>
+            {previewMode && (
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 mt-3">Admin preview mode</p>
+            )}
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                setAccountMessage(null)
-                setShowEditAccount(prev => !prev)
-              }}
-              className="portal-secondary-btn"
-            >
-              {showEditAccount ? 'Close Account Editor' : 'Edit Account Details'}
-            </button>
-            <button
-              onClick={() => {
-                setPasswordMessage(null)
-                setShowPasswordSetup(prev => !prev)
-              }}
-              className="portal-secondary-btn"
-            >
-              {showPasswordSetup ? 'Close Password Setup' : 'Set Password'}
-            </button>
-            <button onClick={onLogout} className="portal-secondary-btn">
-              Sign Out
-            </button>
-          </div>
+          {!previewMode && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  setAccountMessage(null)
+                  setShowEditAccount(prev => !prev)
+                }}
+                className="portal-secondary-btn"
+              >
+                {showEditAccount ? 'Close Account Editor' : 'Edit Account Details'}
+              </button>
+              <button
+                onClick={() => {
+                  setPasswordMessage(null)
+                  setShowPasswordSetup(prev => !prev)
+                }}
+                className="portal-secondary-btn"
+              >
+                {showPasswordSetup ? 'Close Password Setup' : 'Set Password'}
+              </button>
+              <button onClick={onLogout} className="portal-secondary-btn">
+                Sign Out
+              </button>
+            </div>
+          )}
         </div>
 
-        {showEditAccount && (
+        {!previewMode && showEditAccount && (
           <div className="portal-auth-card p-6">
             <h2 className="text-lg font-bold text-slate-900 mb-1">Edit Account Details</h2>
             <p className="text-sm text-slate-600 mb-4">General profile changes apply immediately. Insurance changes are sent for review before they are accepted.</p>
@@ -388,7 +458,7 @@ export default function ClientPortalDashboard({ user, onLogout }) {
           </div>
         )}
 
-        {showPasswordSetup && (
+        {!previewMode && showPasswordSetup && (
           <div className="portal-auth-card p-6">
             <h2 className="text-lg font-bold text-slate-900 mb-1">Set Password</h2>
             <p className="text-sm text-slate-600 mb-4">If you used an email invite link, set a password here for future sign-ins.</p>
@@ -524,6 +594,88 @@ export default function ClientPortalDashboard({ user, onLogout }) {
                         </div>
                       </div>
                     ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+              <div className="portal-auth-card p-6 lg:col-span-5">
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
+                  <div>
+                    <h2 className="text-lg font-bold text-slate-900">Order Tracking</h2>
+                    <p className="text-sm text-slate-600 mt-1">See the tracking number for your current order and past shipments.</p>
+                  </div>
+                  {activeOrder && (
+                    <span className={`inline-flex w-fit px-2.5 py-1 rounded-full text-xs font-semibold ${ORDER_STATUS_META[activeOrder.status]?.className || 'bg-slate-100 text-slate-700'}`}>
+                      Current Order: {formatOrderStatus(activeOrder.status)}
+                    </span>
+                  )}
+                </div>
+
+                {clientOrders.length === 0 ? (
+                  <p className="text-sm text-slate-600">No order history is available yet.</p>
+                ) : (
+                  <div className="space-y-4">
+                    {activeOrder && (
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:p-5">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                          <div>
+                            <p className="text-xs uppercase tracking-[0.15em] font-semibold text-slate-500">Current Order</p>
+                            <p className="text-base font-bold text-slate-900 mt-1">Ship Date: {formatDate(activeOrder.ship_date)}</p>
+                            <p className="text-sm text-slate-600 mt-1">
+                              Tracking #: <span className="font-medium text-slate-900">{formatTrackingNumber(activeOrder.tracking_number)}</span>
+                            </p>
+                          </div>
+                          <div className="text-sm text-slate-600 sm:text-right">
+                            <p>Status: <span className="font-medium text-slate-900">{formatOrderStatus(activeOrder.status)}</span></p>
+                            <p>Ordered: {formatDate(activeOrder.order_placed_at)}</p>
+                            <p>Shipped: {formatDate(activeOrder.shipped_at)}</p>
+                          </div>
+                        </div>
+
+                        {activeOrder.pending_order_items?.length > 0 && (
+                          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                            {activeOrder.pending_order_items.map((item) => (
+                              <div key={item.id} className="rounded-xl bg-white border border-slate-200 p-3">
+                                <p className="font-semibold text-slate-900 text-sm">{item.products?.name || 'Unnamed item'}</p>
+                                <p className="text-xs uppercase tracking-[0.12em] text-slate-500 mt-1">{item.products?.category || 'General'}</p>
+                                <p className="text-sm text-slate-600 mt-2">Qty: {item.quantity || 0}</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {completedOrders.length > 0 && (
+                      <div>
+                        <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-slate-500 mb-3">Past Orders</h3>
+                        <div className="space-y-3">
+                          {completedOrders.map((order) => (
+                            <div key={order.id} className="portal-row-card p-4">
+                              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                                <div>
+                                  <p className="font-semibold text-slate-900">{formatDate(order.ship_date)}</p>
+                                  <p className="text-sm text-slate-600 mt-1">
+                                    Tracking #: <span className="font-medium text-slate-900">{formatTrackingNumber(order.tracking_number)}</span>
+                                  </p>
+                                </div>
+                                <span className={`inline-flex w-fit px-2.5 py-1 rounded-full text-xs font-semibold ${ORDER_STATUS_META[order.status]?.className || 'bg-slate-100 text-slate-700'}`}>
+                                  {formatOrderStatus(order.status)}
+                                </span>
+                              </div>
+
+                              {order.pending_order_items?.length > 0 && (
+                                <p className="text-sm text-slate-600 mt-3">
+                                  {order.pending_order_items.map((item) => `${item.products?.name || 'Item'} x ${item.quantity || 0}`).join(' • ')}
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

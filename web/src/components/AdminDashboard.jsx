@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import ClientPortalDashboard from './ClientPortalDashboard'
 import { generatePhysicianOrder, downloadPDF, getPhysicianOrderSupplierLabel } from '../lib/generatePhysicianOrder'
 import { generateTreatmentRecords, getTreatmentRecordSupplierLabel } from '../lib/generateTreatmentRecords'
 import { generateHardshipForm } from '../lib/generateHardshipForm'
@@ -193,6 +194,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const [syncResult, setSyncResult] = useState(null)
   const [portalInviteSending, setPortalInviteSending] = useState(false)
   const [portalInviteMessage, setPortalInviteMessage] = useState(null)
+  const [showPortalPreview, setShowPortalPreview] = useState(false)
+  const [portalPreviewClient, setPortalPreviewClient] = useState(null)
   const [queueSyncing, setQueueSyncing] = useState(false)
   const [queueSyncResult, setQueueSyncResult] = useState(null)
   const [productNeeded, setProductNeeded] = useState('')
@@ -390,29 +393,6 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     }
 
     return (netYearlyProfit / totalCost) * 100
-  }
-
-  // Formula: next_ship_date = last_ship_date + (qty * days_per_unit) - shipping buffer
-  // Fallback to frequency_days, then 90-day default when usage data is missing.
-  const calculateAutoNextShipDate = ({ fromDateStr, quantity, daysPerUnit, frequencyDays, shippingBufferDays = 2 } = {}) => {
-    const base = fromDateStr ? new Date(`${fromDateStr}T00:00:00`) : new Date()
-    base.setHours(0, 0, 0, 0)
-
-    const qtyValue = Number(quantity)
-    const daysPerUnitValue = Number(daysPerUnit)
-    const frequencyValue = Number(frequencyDays)
-
-    let supplyDays = 90
-    if (Number.isFinite(qtyValue) && qtyValue > 0 && Number.isFinite(daysPerUnitValue) && daysPerUnitValue > 0) {
-      supplyDays = qtyValue * daysPerUnitValue
-    } else if (Number.isFinite(frequencyValue) && frequencyValue > 0) {
-      supplyDays = frequencyValue
-    }
-
-    // Floor keeps at least the intended shipping buffer for fractional-day supplies.
-    const daysToAdd = Math.max(1, Math.floor(supplyDays - shippingBufferDays))
-    base.setDate(base.getDate() + daysToAdd)
-    return base.toISOString().split('T')[0]
   }
 
   const getSupplierForProduct = async (productId) => {
@@ -663,8 +643,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       }
     } catch (error) {
       console.error('Error syncing pending orders from due shipments:', error)
-      setQueueSyncResult({ error: error.message || 'Failed to sync pending orders.' })
       if (showAlert) {
+        setQueueSyncResult({ error: error.message || 'Failed to sync pending orders.' })
         alert('Failed to sync pending orders: ' + (error.message || 'Unknown error'))
       }
     } finally {
@@ -696,12 +676,68 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     fetchAllClientProducts()
     fetchShippingSchedule()
     fetchPendingOrders()
-    syncGeneratePendingOrders({ showAlert: false })
     fetchProjects()
     fetchTasks()
     fetchExpenses()
     fetchCustomDataTables()
   }, [])
+
+  useEffect(() => {
+    if (!supabase) return
+
+    let cancelled = false
+    let refreshTimer = null
+
+    const scheduleRealtimeRefresh = () => {
+      if (refreshTimer) {
+        clearTimeout(refreshTimer)
+      }
+
+      refreshTimer = setTimeout(async () => {
+        if (cancelled) return
+
+        try {
+          await Promise.all([
+            fetchPendingOrders(),
+            fetchShippingSchedule()
+          ])
+
+          if (selectedClient?.id) {
+            await fetchClientProducts(selectedClient.id)
+          }
+        } catch (error) {
+          console.warn('Realtime refresh failed:', error)
+        }
+      }, 250)
+    }
+
+    const pendingOrdersChannel = supabase
+      .channel('admin-pending-orders-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'pending_orders' },
+        scheduleRealtimeRefresh
+      )
+      .subscribe()
+
+    const clientProductsChannel = supabase
+      .channel('admin-client-products-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'client_products' },
+        scheduleRealtimeRefresh
+      )
+      .subscribe()
+
+    return () => {
+      cancelled = true
+      if (refreshTimer) {
+        clearTimeout(refreshTimer)
+      }
+      supabase.removeChannel(pendingOrdersChannel)
+      supabase.removeChannel(clientProductsChannel)
+    }
+  }, [selectedClient?.id])
 
   useEffect(() => {
     if (selectedClient) {
@@ -1177,6 +1213,18 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     }
 
     let trackingNumber = order.tracking_number || null
+    if (nextStatus === 'ordered') {
+      if (!order.client_product_id) {
+        const forceOrder = window.confirm(
+          'This order is missing client_product_id, so the schedule cannot be advanced automatically. Mark ordered anyway?'
+        )
+
+        if (!forceOrder) {
+          return
+        }
+      }
+    }
+
     if (nextStatus === 'shipped') {
       const enteredTracking = window.prompt('Enter tracking number (optional):', order.tracking_number || '')
       if (enteredTracking === null) return
@@ -1197,7 +1245,6 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         )
 
         if (!forceShip) {
-          setUpdating(false)
           return
         }
       }
@@ -1215,58 +1262,43 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
       if (error) throw error
 
-      if (nextStatus === 'shipped') {
-        const shippedDate = getLocalTodayDateString()
-        let scheduleBasis = {
-          quantity: null,
-          days_per_unit: null,
-          frequency_days: null
+      if (nextStatus === 'ordered' && order.client_product_id) {
+        const { data: clientProductData, error: clientProductError } = await supabase
+          .from('client_products')
+          .select(`
+            id,
+            lead_id,
+            product_id,
+            quantity,
+            next_ship_date,
+            frequency_days,
+            products (
+              name
+            ),
+            leads (
+              name
+            )
+          `)
+          .eq('id', order.client_product_id)
+          .single()
+
+        if (clientProductError) throw clientProductError
+
+        const nextShipDate = clientProductData?.next_ship_date
+        if (!nextShipDate) {
+          throw new Error('Order was marked ordered, but no next ship date was generated by the trigger.')
         }
 
-        if (order.client_product_id) {
-          const { data: clientProductData, error: clientProductError } = await supabase
-            .from('client_products')
-            .select(`
-              quantity,
-              frequency_days,
-              products (
-                days_per_unit
-              )
-            `)
-            .eq('id', order.client_product_id)
-            .single()
-
-          if (clientProductError) {
-            console.warn('Could not load client product usage for schedule calculation:', clientProductError)
-          } else if (clientProductData) {
-            scheduleBasis = {
-              quantity: clientProductData.quantity,
-              days_per_unit: clientProductData.products?.days_per_unit ?? null,
-              frequency_days: clientProductData.frequency_days
-            }
-          }
-        }
-
-        const nextShipDate = calculateAutoNextShipDate({
-          fromDateStr: shippedDate,
-          quantity: scheduleBasis.quantity,
-          daysPerUnit: scheduleBasis.days_per_unit,
-          frequencyDays: scheduleBasis.frequency_days
-        })
-
-        if (!order.client_product_id) {
-          alert('Order marked shipped, but schedule was not updated because client_product_id is missing on this order.')
-        } else {
-          const { error: scheduleError } = await supabase
-            .from('client_products')
-            .update({
-              last_ship_date: shippedDate,
-              next_ship_date: nextShipDate
-            })
-            .eq('id', order.client_product_id)
-
-          if (scheduleError) throw scheduleError
-        }
+        await queueNextShipmentOrder({
+          id: clientProductData.id,
+          lead_id: clientProductData.lead_id,
+          product_id: clientProductData.product_id,
+          quantity: clientProductData.quantity,
+          frequency_days: clientProductData.frequency_days,
+          next_ship_date: clientProductData.next_ship_date,
+          client_name: clientProductData.leads?.name || order.leads?.name || 'Unknown Client',
+          product_name: clientProductData.products?.name || order.product_name || 'Unknown Product'
+        }, nextShipDate)
       }
 
       await fetchPendingOrders()
@@ -1600,33 +1632,14 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     }
   }
 
-  const handleMarkShipped = async (shipmentItem) => {
+  const handleMarkOrdered = async (shipmentItem) => {
     if (!supabase || !shipmentItem) return
 
-    const today = getLocalTodayDateString()
     const nowIso = new Date().toISOString()
     const dueShipDate = shipmentItem.next_ship_date
-    const nextShipDate = calculateAutoNextShipDate({
-      fromDateStr: today,
-      quantity: shipmentItem.quantity,
-      daysPerUnit: shipmentItem.days_per_unit,
-      frequencyDays: shipmentItem.frequency_days
-    })
 
     setUpdating(true)
     try {
-      await queueNextShipmentOrder(shipmentItem, nextShipDate)
-
-      const { error } = await supabase
-        .from('client_products')
-        .update({
-          last_ship_date: today,
-          next_ship_date: nextShipDate
-        })
-        .eq('id', shipmentItem.id)
-
-      if (error) throw error
-
       if (dueShipDate) {
         const { data: currentCycleOrder, error: currentCycleOrderError } = await supabase
           .from('pending_orders')
@@ -1643,12 +1656,16 @@ export default function AdminDashboard({ userEmail, onLogout }) {
           const { error: closeOrderError } = await supabase
             .from('pending_orders')
             .update({
-              status: 'shipped',
-              shipped_at: nowIso
+              status: 'ordered',
+              order_placed_at: nowIso
             })
             .eq('id', currentCycleOrder[0].id)
 
           if (closeOrderError) throw closeOrderError
+        } else {
+          alert('No active queue order was found for this ship date. Run "Sync Queue" first, then mark ordered.')
+          setUpdating(false)
+          return
         }
       }
 
@@ -1658,10 +1675,10 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
       await fetchShippingSchedule()
       await fetchPendingOrders()
-      alert(`Shipped! Next ${shipmentItem.product_name || 'product'} order scheduled for ${formatDate(nextShipDate)}.`)
+      alert(`Order for ${shipmentItem.product_name || 'product'} was marked ordered.`)
     } catch (error) {
-      console.error('Error marking shipment:', error)
-      alert('Failed to mark shipment: ' + error.message)
+      console.error('Error marking order:', error)
+      alert('Failed to mark ordered: ' + error.message)
     } finally {
       setUpdating(false)
     }
@@ -2062,6 +2079,18 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     } finally {
       setPortalInviteSending(false)
     }
+  }
+
+  const handleOpenPortalPreview = () => {
+    if (!selectedClient?.email) return
+
+    setPortalPreviewClient(selectedClient)
+    setShowPortalPreview(true)
+  }
+
+  const handleClosePortalPreview = () => {
+    setShowPortalPreview(false)
+    setPortalPreviewClient(null)
   }
 
   const handleApproveInsuranceUpdate = async () => {
@@ -3420,9 +3449,15 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                 <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-h-[calc(100vh-200px)] overflow-y-auto">
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="text-lg sm:text-xl font-bold text-gray-900">
+                      <button
+                        type="button"
+                        onClick={handleOpenPortalPreview}
+                        disabled={!selectedClient.email}
+                        className="text-left text-lg sm:text-xl font-bold text-gray-900 hover:text-slate-700 disabled:cursor-not-allowed disabled:hover:text-gray-900"
+                        title={selectedClient.email ? 'Open portal preview' : 'Client email is required to preview the portal'}
+                      >
                         {selectedClient.name}
-                      </h3>
+                      </button>
                       {selectedClient.is_paused && (
                         <span className="px-2 py-0.5 text-xs rounded-full bg-yellow-100 text-yellow-800 font-medium">
                           Paused Client
@@ -3430,6 +3465,13 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                       )}
                     </div>
                     <div className="flex items-center gap-2">
+                      <button
+                        onClick={handleOpenPortalPreview}
+                        disabled={!selectedClient.email}
+                        className="bg-slate-900 hover:bg-slate-800 disabled:bg-gray-400 text-white px-3 py-1.5 rounded text-sm"
+                      >
+                        View Portal
+                      </button>
                       <button
                         onClick={handleSendPortalInvite}
                         disabled={portalInviteSending || !selectedClient.email}
@@ -4523,6 +4565,30 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                       </div>
                     )}
                   </div>
+
+                  {showPortalPreview && portalPreviewClient?.email && (
+                    <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm overflow-y-auto">
+                      <div className="min-h-full px-2 py-2 sm:px-4 sm:py-4">
+                        <div className="max-w-7xl mx-auto relative">
+                          <div className="sticky top-0 z-10 flex justify-end pb-2">
+                            <button
+                              onClick={handleClosePortalPreview}
+                              className="rounded-full bg-white/95 px-4 py-2 text-sm font-semibold text-slate-900 shadow-lg hover:bg-white"
+                            >
+                              Close Preview
+                            </button>
+                          </div>
+                          <div className="rounded-3xl overflow-hidden shadow-2xl bg-white">
+                            <ClientPortalDashboard
+                              user={{ email: portalPreviewClient.email }}
+                              previewMode={true}
+                              onLogout={handleClosePortalPreview}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="p-8 text-center text-gray-500 hidden md:block">
@@ -4605,11 +4671,11 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                         <div className="text-xs text-gray-600 mt-1">{item.product_name}</div>
                         <div className="text-xs text-gray-600">Qty: {item.quantity}</div>
                         <button
-                          onClick={() => handleMarkShipped(item)}
+                          onClick={() => handleMarkOrdered(item)}
                           disabled={updating}
                           className="mt-2 w-full px-2 py-1 bg-green-600 hover:bg-green-700 text-white rounded text-xs font-medium"
                         >
-                          ✓ Mark Shipped
+                          ✓ Mark Ordered
                         </button>
                       </div>
                     ))
@@ -6166,11 +6232,11 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                                   <div className="text-sm text-gray-600">{item.product_name} × {item.quantity}</div>
                                 </div>
                                 <button
-                                  onClick={() => handleMarkShipped(item)}
+                                  onClick={() => handleMarkOrdered(item)}
                                   disabled={updating}
                                   className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md text-sm font-medium"
                                 >
-                                  ✓ Mark Shipped
+                                  ✓ Mark Ordered
                                 </button>
                               </div>
                             ))}
