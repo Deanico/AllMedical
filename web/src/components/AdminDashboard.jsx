@@ -192,6 +192,13 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', insurance: '', insurance_id: '', insurance_deductible: '', insurance_oop_max: '', birthday: '', address_line1: '', city: '', state: '', zip_code: '', shipping_duration: '', payment_status: '', prior_auth_status: '', prior_auth_start_date: '', prior_auth_end_date: '', is_paused: false })
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState(null)
+  const [financialSyncing, setFinancialSyncing] = useState(false)
+  const [financialSyncResult, setFinancialSyncResult] = useState(null)
+  const [financialClaimsRows, setFinancialClaimsRows] = useState([])
+  const [financialOpsRows, setFinancialOpsRows] = useState([])
+  const [financialPnlTotals, setFinancialPnlTotals] = useState(null)
+  const [financialPnlMonthly, setFinancialPnlMonthly] = useState([])
+  const [financialLastSyncedAt, setFinancialLastSyncedAt] = useState(null)
   const [portalInviteSending, setPortalInviteSending] = useState(false)
   const [portalInviteMessage, setPortalInviteMessage] = useState(null)
   const [showPortalPreview, setShowPortalPreview] = useState(false)
@@ -311,6 +318,15 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   // Helper function to format dates without timezone conversion
   const formatDate = (dateString) => {
     return formatDisplayDate(dateString)
+  }
+
+  const formatCurrency = (value) => {
+    const amount = Number(value || 0)
+    return amount.toLocaleString('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2
+    })
   }
 
   const getLocalTodayDateString = () => {
@@ -679,8 +695,15 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     fetchProjects()
     fetchTasks()
     fetchExpenses()
+    fetchFinancialReportsData()
     fetchCustomDataTables()
   }, [])
+
+  useEffect(() => {
+    if (activeView === 'reports') {
+      fetchFinancialReportsData()
+    }
+  }, [activeView])
 
   useEffect(() => {
     if (!supabase) return
@@ -1061,6 +1084,95 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     }
   }
 
+  const fetchFinancialReportsData = async () => {
+    if (!supabase) return
+
+    try {
+      const [
+        claimsResponse,
+        opsResponse,
+        pnlTotalsResponse,
+        pnlMonthlyResponse,
+        syncJobsResponse
+      ] = await Promise.all([
+        supabase
+          .from('v_reports_claims')
+          .select('*')
+          .order('paid_date', { ascending: false })
+          .limit(200),
+        supabase
+          .from('v_reports_expenses_shipments')
+          .select('*')
+          .order('entry_date', { ascending: false })
+          .limit(200),
+        supabase
+          .from('v_profit_loss_totals')
+          .select('*')
+          .limit(1)
+          .single(),
+        supabase
+          .from('v_profit_loss_monthly')
+          .select('*')
+          .order('month', { ascending: false })
+          .limit(24),
+        supabase
+          .from('sheet_sync_jobs')
+          .select('created_at, status, claims_rows_upserted, ops_rows_upserted, error_message')
+          .eq('sync_type', 'financial_sheets')
+          .order('created_at', { ascending: false })
+          .limit(1)
+      ])
+
+      if (claimsResponse.error) throw claimsResponse.error
+      if (opsResponse.error) throw opsResponse.error
+
+      if (pnlTotalsResponse.error && pnlTotalsResponse.error.code !== 'PGRST116') {
+        throw pnlTotalsResponse.error
+      }
+
+      if (pnlMonthlyResponse.error) throw pnlMonthlyResponse.error
+      if (syncJobsResponse.error) throw syncJobsResponse.error
+
+      setFinancialClaimsRows(claimsResponse.data || [])
+      setFinancialOpsRows(opsResponse.data || [])
+      setFinancialPnlTotals(pnlTotalsResponse.data || null)
+      setFinancialPnlMonthly(pnlMonthlyResponse.data || [])
+      setFinancialLastSyncedAt(syncJobsResponse.data?.[0]?.created_at || null)
+    } catch (error) {
+      console.error('Error fetching financial report data:', error)
+    }
+  }
+
+  const handleSyncFinancialSheets = async () => {
+    setFinancialSyncing(true)
+
+    try {
+      const response = await fetch('/api/sync-financial-sheets', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      })
+
+      const result = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(result?.error || result?.message || 'Failed to sync financial sheets')
+      }
+
+      setFinancialSyncResult(result)
+      await fetchFinancialReportsData()
+
+      setTimeout(() => {
+        setFinancialSyncResult(null)
+      }, 30000)
+    } catch (error) {
+      console.error('Financial sync error:', error)
+      setFinancialSyncResult({ error: error.message || 'Failed to sync financial sheets' })
+    } finally {
+      setFinancialSyncing(false)
+    }
+  }
+
   const fetchClientProducts = async (clientId) => {
     if (!supabase || !clientId) return
 
@@ -1139,12 +1251,14 @@ export default function AdminDashboard({ userEmail, onLogout }) {
             category,
             days_per_unit
           ),
-          leads (
+          leads!inner (
             id,
-            name
+            name,
+            is_paused
           )
         `)
         .eq('active', true)
+        .eq('leads.is_paused', false)
         .not('next_ship_date', 'is', null)
         .order('next_ship_date', { ascending: true })
 
@@ -2760,12 +2874,17 @@ export default function AdminDashboard({ userEmail, onLogout }) {
               {navigation.find(n => n.id === activeView)?.name || 'Dashboard'}
             </h2>
             <button
-              onClick={handleSyncFromSheets}
-              disabled={syncing}
+              onClick={activeView === 'reports' ? handleSyncFinancialSheets : handleSyncFromSheets}
+              disabled={activeView === 'reports' ? financialSyncing : syncing}
               className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
             >
-              <DashboardIcon name="sync" className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
-              {syncing ? 'Syncing...' : 'Sync from Google Sheets'}
+              <DashboardIcon
+                name="sync"
+                className={`h-4 w-4 ${(activeView === 'reports' ? financialSyncing : syncing) ? 'animate-spin' : ''}`}
+              />
+              {activeView === 'reports'
+                ? (financialSyncing ? 'Syncing Financials...' : 'Sync Financial Sheets')
+                : (syncing ? 'Syncing...' : 'Sync from Google Sheets')}
             </button>
           </div>
         </div>
@@ -2780,6 +2899,20 @@ export default function AdminDashboard({ userEmail, onLogout }) {
             ) : (
               <div className="bg-green-50 border-2 border-green-400 text-green-800 px-6 py-4 rounded-lg mb-4 text-lg font-semibold">
                 ✓ Successfully imported {syncResult.added} new leads from Google Sheets! ({syncResult.skipped} duplicates skipped)
+              </div>
+            )}
+          </div>
+        )}
+
+        {financialSyncResult && (
+          <div className="px-6 pt-4">
+            {financialSyncResult.error ? (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+                {financialSyncResult.error}
+              </div>
+            ) : (
+              <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 px-4 py-3 rounded mb-4 text-sm font-medium">
+                Financial sync complete. Claims upserted: {financialSyncResult.claimsRowsUpserted || 0}, operations upserted: {financialSyncResult.opsRowsUpserted || 0}.
               </div>
             )}
           </div>
@@ -5063,8 +5196,188 @@ export default function AdminDashboard({ userEmail, onLogout }) {
             }
           })
 
+          const totalRevenue = Number(financialPnlTotals?.total_revenue || 0)
+          const totalExpenses = Number(financialPnlTotals?.total_expenses || 0)
+          const totalShipmentCost = Number(financialPnlTotals?.total_shipment_cost || 0)
+          const netProfit = Number(financialPnlTotals?.net_profit || 0)
+          const profitMarginPercent = Number(financialPnlTotals?.profit_margin_percent || 0)
+
           return (
             <div className="space-y-4 sm:space-y-6">
+              <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-6">
+                  <div>
+                    <h2 className="text-2xl font-bold text-gray-900">Financial Reports (Google Sheets)</h2>
+                    <p className="text-sm text-gray-600 mt-1">
+                      Last sync: {financialLastSyncedAt ? formatDisplayDate(financialLastSyncedAt) : 'Not synced yet'}
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleSyncFinancialSheets}
+                    disabled={financialSyncing}
+                    className="inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 text-white px-4 py-2 rounded-md text-sm font-semibold"
+                  >
+                    <DashboardIcon name="sync" className={`h-4 w-4 ${financialSyncing ? 'animate-spin' : ''}`} />
+                    {financialSyncing ? 'Syncing Financial Sheets...' : 'Sync Financial Sheets'}
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4 mb-6">
+                  <div className="bg-emerald-50 border border-emerald-300 rounded-lg p-4">
+                    <div className="text-xs uppercase tracking-wide text-emerald-800 font-semibold">Revenue</div>
+                    <div className="text-2xl font-bold text-emerald-700 mt-1">{formatCurrency(totalRevenue)}</div>
+                  </div>
+                  <div className="bg-rose-50 border border-rose-300 rounded-lg p-4">
+                    <div className="text-xs uppercase tracking-wide text-rose-800 font-semibold">Expenses</div>
+                    <div className="text-2xl font-bold text-rose-700 mt-1">{formatCurrency(totalExpenses)}</div>
+                  </div>
+                  <div className="bg-orange-50 border border-orange-300 rounded-lg p-4">
+                    <div className="text-xs uppercase tracking-wide text-orange-800 font-semibold">Shipment Cost</div>
+                    <div className="text-2xl font-bold text-orange-700 mt-1">{formatCurrency(totalShipmentCost)}</div>
+                  </div>
+                  <div className="bg-blue-50 border border-blue-300 rounded-lg p-4">
+                    <div className="text-xs uppercase tracking-wide text-blue-800 font-semibold">Net Profit</div>
+                    <div className="text-2xl font-bold text-blue-700 mt-1">{formatCurrency(netProfit)}</div>
+                  </div>
+                  <div className="bg-violet-50 border border-violet-300 rounded-lg p-4">
+                    <div className="text-xs uppercase tracking-wide text-violet-800 font-semibold">Margin</div>
+                    <div className="text-2xl font-bold text-violet-700 mt-1">{profitMarginPercent.toFixed(2)}%</div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+                    <div className="text-xs uppercase tracking-wide text-slate-600 font-semibold">Qualified Clients</div>
+                    <div className="text-2xl font-bold text-slate-900 mt-1">{clientsWithCalc.length}</div>
+                  </div>
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+                    <div className="text-xs uppercase tracking-wide text-slate-600 font-semibold">Gross Revenue</div>
+                    <div className="text-2xl font-bold text-slate-900 mt-1">{formatCurrency(totals.totalGrossRevenue)}</div>
+                  </div>
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+                    <div className="text-xs uppercase tracking-wide text-slate-600 font-semibold">Net Client Profit</div>
+                    <div className="text-2xl font-bold text-slate-900 mt-1">{formatCurrency(totals.totalNetProfit)}</div>
+                  </div>
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+                    <div className="text-xs uppercase tracking-wide text-slate-600 font-semibold">Avg Profit / Client</div>
+                    <div className="text-2xl font-bold text-slate-900 mt-1">{formatCurrency(avgProfitPerCustomer)}</div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                  <div className="border border-gray-200 rounded-lg overflow-hidden">
+                    <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
+                      <h3 className="text-base font-semibold text-gray-900">Paid Claims</h3>
+                    </div>
+                    <div className="max-h-80 overflow-auto">
+                      <table className="w-full">
+                        <thead className="bg-white sticky top-0 border-b">
+                          <tr>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700">Date</th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700">Claim</th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700">Patient</th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700">Payer</th>
+                            <th className="px-3 py-2 text-right text-xs font-semibold text-gray-700">Amount</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {financialClaimsRows.length === 0 && (
+                            <tr>
+                              <td colSpan="5" className="px-3 py-8 text-center text-sm text-gray-500">
+                                No paid claims synced yet.
+                              </td>
+                            </tr>
+                          )}
+                          {financialClaimsRows.map((row) => (
+                            <tr key={row.id}>
+                              <td className="px-3 py-2 text-sm text-gray-700">{row.paid_date ? new Date(row.paid_date).toLocaleDateString() : 'N/A'}</td>
+                              <td className="px-3 py-2 text-sm text-gray-900">{row.claim_id || 'N/A'}</td>
+                              <td className="px-3 py-2 text-sm text-gray-900">{row.patient_name || 'N/A'}</td>
+                              <td className="px-3 py-2 text-sm text-gray-700">{row.payer || 'N/A'}</td>
+                              <td className="px-3 py-2 text-sm text-right font-medium text-gray-900">{formatCurrency(row.amount_paid)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div className="border border-gray-200 rounded-lg overflow-hidden">
+                    <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
+                      <h3 className="text-base font-semibold text-gray-900">Expenses & Shipments</h3>
+                    </div>
+                    <div className="max-h-80 overflow-auto">
+                      <table className="w-full">
+                        <thead className="bg-white sticky top-0 border-b">
+                          <tr>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700">Date</th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700">Type</th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700">Category</th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700">Description</th>
+                            <th className="px-3 py-2 text-right text-xs font-semibold text-gray-700">Amount</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {financialOpsRows.length === 0 && (
+                            <tr>
+                              <td colSpan="5" className="px-3 py-8 text-center text-sm text-gray-500">
+                                No expense or shipment rows synced yet.
+                              </td>
+                            </tr>
+                          )}
+                          {financialOpsRows.map((row) => (
+                            <tr key={row.id}>
+                              <td className="px-3 py-2 text-sm text-gray-700">{row.entry_date ? new Date(row.entry_date).toLocaleDateString() : 'N/A'}</td>
+                              <td className="px-3 py-2 text-sm text-gray-900 capitalize">{row.entry_type || 'expense'}</td>
+                              <td className="px-3 py-2 text-sm text-gray-700">{row.category || 'N/A'}</td>
+                              <td className="px-3 py-2 text-sm text-gray-900">{row.description || 'N/A'}</td>
+                              <td className="px-3 py-2 text-sm text-right font-medium text-gray-900">{formatCurrency(row.amount)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-6 border border-gray-200 rounded-lg overflow-hidden">
+                  <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
+                    <h3 className="text-base font-semibold text-gray-900">Monthly Profit & Loss</h3>
+                  </div>
+                  <div className="max-h-72 overflow-auto">
+                    <table className="w-full">
+                      <thead className="bg-white sticky top-0 border-b">
+                        <tr>
+                          <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700">Month</th>
+                          <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700">Revenue</th>
+                          <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700">Expenses</th>
+                          <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700">Shipment Cost</th>
+                          <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700">Net Profit</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {financialPnlMonthly.length === 0 && (
+                          <tr>
+                            <td colSpan="5" className="px-4 py-8 text-center text-sm text-gray-500">
+                              No monthly P&L data yet. Sync financial sheets to populate this section.
+                            </td>
+                          </tr>
+                        )}
+                        {financialPnlMonthly.map((row) => (
+                          <tr key={row.month}>
+                            <td className="px-4 py-2 text-sm text-gray-900">{row.month}</td>
+                            <td className="px-4 py-2 text-sm text-right text-gray-900">{formatCurrency(row.revenue)}</td>
+                            <td className="px-4 py-2 text-sm text-right text-gray-700">{formatCurrency(row.expenses)}</td>
+                            <td className="px-4 py-2 text-sm text-right text-gray-700">{formatCurrency(row.shipment_cost)}</td>
+                            <td className="px-4 py-2 text-sm text-right font-semibold text-gray-900">{formatCurrency(row.net_profit)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
               {/* Expense Management Section */}
               <div className="bg-white rounded-lg shadow p-4 sm:p-6">
                 <div className="flex justify-between items-center mb-6">

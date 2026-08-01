@@ -1,0 +1,45 @@
+# Copy these into web/.env (local) and Azure App Settings (production)
+# Keep your sheets PRIVATE. Share each sheet only with your service account email as Viewer.
+
+GOOGLE_SERVICE_ACCOUNT_EMAIL=your-service-account@your-project.iam.gserviceaccount.com
+GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYOUR_PRIVATE_KEY\n-----END PRIVATE KEY-----\n"
+
+# Paid claims source
+GOOGLE_CLAIMS_SHEET_ID=1t0j0TB2aneW39fF5oTSTcsR0MXx5bM4QMYOWT9pSGwg
+GOOGLE_CLAIMS_SHEET_RANGE=Patient Ledger!A:R
+
+# Claims column mapping (0-based)
+# Date of service=A, Client/Patient Name=B, Insurance=D, Amount Paid=R
+CLAIMS_DATE_COLUMN=0
+CLAIMS_PATIENT_COLUMN=1
+CLAIMS_PAYER_COLUMN=3
+CLAIMS_AMOUNT_COLUMN=17
+# Claim ID appears in column A for many rows; keep this mapped to A unless you move it.
+CLAIMS_ID_COLUMN=0
+# No dedicated notes column visible in Patient Ledger; leave at a safe column.
+CLAIMS_NOTES_COLUMN=18
+
+# Expense + shipments source
+GOOGLE_OPS_SHEET_ID=1tcIKuUAps3nfbtxATyE76xG7o4cMK4ecMp0YifW0-KQ
+# Replace EXPENSE_TAB with your actual tab name in that workbook
+GOOGLE_OPS_SHEET_RANGE=EXPENSE_TAB!A:O
+
+# Ops column mapping (0-based)
+# From your screenshot: Vendor=D, Order/Tracking #=E, Status=F, Amount=G,
+# Patient Name=I, Item Description=J, Order Date=M.
+# We map this into the sync schema as:
+OPS_DATE_COLUMN=12
+OPS_TYPE_COLUMN=5
+OPS_CATEGORY_COLUMN=3
+OPS_DESCRIPTION_COLUMN=9
+OPS_VENDOR_COLUMN=3
+OPS_AMOUNT_COLUMN=6
+OPS_NOTES_COLUMN=14
+
+# Optional: enable auto-sync while server is running
+FINANCIAL_SYNC_INTERVAL_MINUTES=15
+FINANCIAL_SYNC_RUN_ON_START=true
+
+# Optional third sheet (P&L reference only for now; not consumed by code yet)
+GOOGLE_PNL_SHEET_ID=1R3WgvDaU85PoalH-Zj58dY7d8netbu1xKrwlGpTKKio
+GOOGLE_PNL_SHEET_RANGE=AllMedical_PnL_by_Insurance_Real!A:G

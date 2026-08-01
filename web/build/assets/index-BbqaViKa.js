@@ -138,11 +138,12 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
             category,
             days_per_unit
           ),
-          leads (
+          leads!inner (
             id,
-            name
+            name,
+            is_paused
           )
-        `).eq("active",!0).not("next_ship_date","is",null).order("next_ship_date",{ascending:!0});if(I)throw I;const oe=(g||[]).map(Re=>({...Re,client_name:Re.leads?.name||"Unknown Client",product_name:Re.products?.name||"Unknown Product",days_per_unit:Re.products?.days_per_unit??null}));li(oe)}catch(g){console.error("Error fetching shipping schedule:",g)}},aa=async()=>{if(Oe)try{const{data:g,error:I}=await Oe.from("pending_orders").select(`
+        `).eq("active",!0).eq("leads.is_paused",!1).not("next_ship_date","is",null).order("next_ship_date",{ascending:!0});if(I)throw I;const oe=(g||[]).map(Re=>({...Re,client_name:Re.leads?.name||"Unknown Client",product_name:Re.products?.name||"Unknown Product",days_per_unit:Re.products?.days_per_unit??null}));li(oe)}catch(g){console.error("Error fetching shipping schedule:",g)}},aa=async()=>{if(Oe)try{const{data:g,error:I}=await Oe.from("pending_orders").select(`
           *,
           leads (
             id,
