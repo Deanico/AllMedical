@@ -279,13 +279,15 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const [assignProductForm, setAssignProductForm] = useState({
     product_id: '',
     quantity: 1,
-    next_ship_date: new Date().toISOString().split('T')[0],
+    next_ship_date: '',
     frequency_days: 30
   })
   const [showEditClientProductModal, setShowEditClientProductModal] = useState(false)
   const [editingClientProduct, setEditingClientProduct] = useState(null)
   const [editClientProductForm, setEditClientProductForm] = useState({ quantity: 1, next_ship_date: '' })
   const [shippingScheduleItems, setShippingScheduleItems] = useState([])
+  const [clientOrderHistory, setClientOrderHistory] = useState([])
+  const [showOrderHistory, setShowOrderHistory] = useState(false)
 
   // Projects & Tasks State
   const [projects, setProjects] = useState([])
@@ -766,6 +768,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     if (selectedClient) {
       fetchDoctors(selectedClient.id)
       fetchClientProducts(selectedClient.id)
+      fetchClientOrderHistory(selectedClient.id)
+      setShowOrderHistory(false)
       setProductNeeded(selectedClient.product_needed || '')
       setPortalInviteMessage(null)
       // Reset calculator editing state when switching clients
@@ -1170,6 +1174,41 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       setFinancialSyncResult({ error: error.message || 'Failed to sync financial sheets' })
     } finally {
       setFinancialSyncing(false)
+    }
+  }
+
+  const fetchClientOrderHistory = async (clientId) => {
+    if (!supabase || !clientId) return
+    try {
+      const { data, error } = await supabase
+        .from('pending_orders')
+        .select(`
+          id,
+          ship_date,
+          status,
+          order_placed_at,
+          shipped_at,
+          tracking_number,
+          order_details,
+          client_product_id,
+          pending_order_items (
+            id,
+            quantity,
+            products (
+              id,
+              name,
+              category
+            )
+          )
+        `)
+        .eq('lead_id', clientId)
+        .in('status', ['ordered', 'shipped', 'cancelled'])
+        .order('ship_date', { ascending: false })
+        .limit(50)
+      if (error) throw error
+      setClientOrderHistory(data || [])
+    } catch (err) {
+      console.error('Error fetching client order history:', err)
     }
   }
 
@@ -1777,9 +1816,28 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
           if (closeOrderError) throw closeOrderError
         } else {
-          alert('No active queue order was found for this ship date. Run "Sync Queue" first, then mark ordered.')
-          setUpdating(false)
-          return
+          // No queue entry exists — create one directly as ordered
+          const orderDetails = {
+            patient_name: shipmentItem.client_name || null,
+            product_name: shipmentItem.product_name || null,
+            product_id: shipmentItem.product_id || null,
+            quantity: shipmentItem.quantity || 1,
+            ship_date: dueShipDate,
+            auto_generated: false
+          }
+          const { error: insertOrderError } = await supabase
+            .from('pending_orders')
+            .insert([
+              {
+                lead_id: shipmentItem.lead_id,
+                client_product_id: shipmentItem.id,
+                ship_date: dueShipDate,
+                status: 'ordered',
+                order_placed_at: nowIso,
+                order_details: orderDetails
+              }
+            ])
+          if (insertOrderError) throw insertOrderError
         }
       }
 
@@ -3901,6 +3959,56 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                             </div>
                           ))}
                         </div>
+                      )}
+                    </div>
+
+                    {/* Order History Section */}
+                    <div className="border-t pt-4">
+                      <button
+                        onClick={() => {
+                          setShowOrderHistory(prev => !prev)
+                          if (!showOrderHistory) fetchClientOrderHistory(selectedClient.id)
+                        }}
+                        className="flex items-center justify-between w-full text-sm font-medium text-gray-700 mb-2"
+                      >
+                        <span>Order History ({clientOrderHistory.length})</span>
+                        <span className="text-gray-400">{showOrderHistory ? '▲' : '▼'}</span>
+                      </button>
+                      {showOrderHistory && (
+                        clientOrderHistory.length === 0 ? (
+                          <div className="text-sm text-gray-500 bg-gray-50 p-3 rounded-md text-center">
+                            No completed orders yet.
+                          </div>
+                        ) : (
+                          <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                            {clientOrderHistory.map(order => {
+                              const statusColors = {
+                                ordered: 'bg-blue-50 border-blue-200 text-blue-700',
+                                shipped: 'bg-emerald-50 border-emerald-200 text-emerald-700',
+                                cancelled: 'bg-rose-50 border-rose-200 text-rose-600',
+                              }
+                              const itemNames = (order.pending_order_items || []).map(i => `${i.products?.name || 'Item'} ×${i.quantity}`).join(' • ')
+                              return (
+                                <div key={order.id} className={`rounded-lg border p-3 text-xs ${statusColors[order.status] || 'bg-gray-50 border-gray-200'}`}>
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className="font-semibold">{order.ship_date ? formatDate(order.ship_date) : '—'}</span>
+                                    <span className="capitalize font-medium">{order.status}</span>
+                                  </div>
+                                  {itemNames && <div className="text-gray-600">{itemNames}</div>}
+                                  {order.tracking_number && (
+                                    <div className="mt-1 text-gray-500">Tracking: <span className="font-medium text-gray-700">{order.tracking_number}</span></div>
+                                  )}
+                                  {order.order_placed_at && (
+                                    <div className="text-gray-400 mt-0.5">Ordered: {formatDate(order.order_placed_at)}</div>
+                                  )}
+                                  {order.shipped_at && (
+                                    <div className="text-gray-400">Shipped: {formatDate(order.shipped_at)}</div>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )
                       )}
                     </div>
 
@@ -7930,13 +8038,13 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                     product_id: assignProductForm.product_id,
                     quantity: parseInt(assignProductForm.quantity),
                     frequency_days: parseInt(assignProductForm.frequency_days) || 30,
-                    next_ship_date: assignProductForm.next_ship_date
+                    next_ship_date: assignProductForm.next_ship_date || null
                   }])
                 if (error) throw error
                 await fetchClientProducts(assignProductClient.id)
                 await fetchShippingSchedule()
                 setShowAssignProductModal(false)
-                setAssignProductForm({ product_id: '', quantity: 1, next_ship_date: new Date().toISOString().split('T')[0], frequency_days: 30 })
+                setAssignProductForm({ product_id: '', quantity: 1, next_ship_date: '', frequency_days: 30 })
                 alert('Product assigned successfully!')
               } catch (error) {
                 console.error('Error assigning product:', error)
@@ -7971,14 +8079,14 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Next Shipping Date *</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">First Ship Date <span className="text-gray-400 font-normal">(optional — set later)</span></label>
                 <input
                   type="date"
                   value={assignProductForm.next_ship_date}
                   onChange={(e) => setAssignProductForm({ ...assignProductForm, next_ship_date: e.target.value })}
-                  required
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
+                <p className="text-xs text-gray-500 mt-1">Leave blank to add the product now and set a ship date later. Once a date is set and an order is marked ordered, the next ship date auto-advances.</p>
               </div>
               <div className="flex gap-3 justify-end">
                 <button
@@ -7986,7 +8094,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   onClick={() => {
                     setShowAssignProductModal(false)
                     setAssignProductClient(null)
-                    setAssignProductForm({ product_id: '', quantity: 1, next_ship_date: new Date().toISOString().split('T')[0], frequency_days: 30 })
+                    setAssignProductForm({ product_id: '', quantity: 1, next_ship_date: '', frequency_days: 30 })
                   }}
                   className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
                 >
