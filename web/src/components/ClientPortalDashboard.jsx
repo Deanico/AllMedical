@@ -31,6 +31,20 @@ const formatTrackingNumber = (value) => {
   return value
 }
 
+const toDayKey = (value) => {
+  if (!value) return null
+  const parsed = new Date(`${value}T00:00:00`)
+  if (Number.isNaN(parsed.getTime())) return null
+  return Math.floor(parsed.getTime() / 86400000)
+}
+
+const ACTIVE_STATUS_PRIORITY = {
+  pending: 1,
+  reviewed: 2,
+  ready_to_order: 3,
+  ordered: 4
+}
+
 export default function ClientPortalDashboard({ user, onLogout, previewMode = false }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -136,6 +150,7 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
           .from('pending_orders')
           .select(`
             id,
+            client_product_id,
             ship_date,
             status,
             tracking_number,
@@ -197,13 +212,106 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
     if (clientOrders.length === 0) return null
 
     const activeStatuses = new Set(['pending', 'reviewed', 'ready_to_order', 'ordered'])
-    return clientOrders.find((order) => activeStatuses.has(order.status)) || clientOrders[0]
+    const activeOrders = clientOrders.filter((order) => activeStatuses.has(order.status))
+
+    if (activeOrders.length === 0) {
+      return clientOrders[0]
+    }
+
+    // Treat all rows sharing the most recent ship_date as one cycle, then prefer
+    // the most advanced workflow row with the most complete item breakdown.
+    const latestShipDate = activeOrders.reduce((latest, order) => {
+      const shipDate = order.ship_date || ''
+      if (!latest) return shipDate
+      return shipDate > latest ? shipDate : latest
+    }, '')
+
+    const currentCycleOrders = latestShipDate
+      ? activeOrders.filter((order) => (order.ship_date || '') === latestShipDate)
+      : activeOrders
+
+    const sortedCurrentCycle = [...currentCycleOrders].sort((first, second) => {
+      const firstPriority = ACTIVE_STATUS_PRIORITY[first.status] || 0
+      const secondPriority = ACTIVE_STATUS_PRIORITY[second.status] || 0
+      if (secondPriority !== firstPriority) {
+        return secondPriority - firstPriority
+      }
+
+      const firstItemCount = first.pending_order_items?.length || 0
+      const secondItemCount = second.pending_order_items?.length || 0
+      if (secondItemCount !== firstItemCount) {
+        return secondItemCount - firstItemCount
+      }
+
+      const firstHasOrderPlacedAt = first.order_placed_at ? 1 : 0
+      const secondHasOrderPlacedAt = second.order_placed_at ? 1 : 0
+      if (secondHasOrderPlacedAt !== firstHasOrderPlacedAt) {
+        return secondHasOrderPlacedAt - firstHasOrderPlacedAt
+      }
+
+      const firstUpdatedAt = first.updated_at || first.created_at || ''
+      const secondUpdatedAt = second.updated_at || second.created_at || ''
+      return secondUpdatedAt.localeCompare(firstUpdatedAt)
+    })
+
+    return sortedCurrentCycle[0] || activeOrders[0] || clientOrders[0]
   }, [clientOrders])
 
   const completedOrders = useMemo(() => {
     if (clientOrders.length === 0) return []
 
-    return clientOrders.filter((order) => order.id !== activeOrder?.id)
+    const activeStatuses = new Set(['pending', 'reviewed', 'ready_to_order', 'ordered'])
+    const baseOrders = clientOrders.filter((order) => {
+      if (order.id === activeOrder?.id) return false
+
+      if (activeStatuses.has(order.status)) {
+        // Hide sibling active rows from the same cycle to avoid confusing duplicates.
+        return (order.ship_date || '') !== (activeOrder?.ship_date || '')
+      }
+
+      return true
+    })
+
+    if (!activeOrder) {
+      return baseOrders
+    }
+
+    const activeProducts = new Set(
+      (activeOrder.pending_order_items || [])
+        .map((item) => item.products?.id || item.products?.name || null)
+        .filter(Boolean)
+    )
+
+    const activeShipDay = toDayKey(activeOrder.ship_date)
+
+    // Suppress stale, near-date subset rows caused by schedule/date reshuffles.
+    return baseOrders.filter((order) => {
+      const isUnshipped = !order.shipped_at
+      const noTracking = !order.tracking_number
+      const sameWorkflowStage = order.status === activeOrder.status
+      const orderItems = order.pending_order_items || []
+
+      if (!isUnshipped || !noTracking || !sameWorkflowStage || orderItems.length === 0 || activeProducts.size === 0) {
+        return true
+      }
+
+      const orderShipDay = toDayKey(order.ship_date)
+      if (orderShipDay === null || activeShipDay === null) {
+        return true
+      }
+
+      const dayDelta = activeShipDay - orderShipDay
+      if (dayDelta < 0 || dayDelta > 3) {
+        return true
+      }
+
+      const isSubsetOfActiveProducts = orderItems.every((item) => {
+        const productKey = item.products?.id || item.products?.name || null
+        return Boolean(productKey) && activeProducts.has(productKey)
+      })
+
+      return !isSubsetOfActiveProducts
+    })
   }, [activeOrder, clientOrders])
 
   useEffect(() => {

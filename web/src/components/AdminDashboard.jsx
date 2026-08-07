@@ -8014,16 +8014,81 @@ export default function AdminDashboard({ userEmail, onLogout }) {
             <form onSubmit={async (e) => {
               e.preventDefault()
               try {
+                const previousShipDate = editingClientProduct.next_ship_date || null
+                const updatedShipDate = editClientProductForm.next_ship_date || null
+
                 const { error } = await supabase
                   .from('client_products')
                   .update({
                     quantity: parseInt(editClientProductForm.quantity),
-                    next_ship_date: editClientProductForm.next_ship_date || null
+                    next_ship_date: updatedShipDate
                   })
                   .eq('id', editingClientProduct.id)
                 if (error) throw error
+
+                if (previousShipDate && updatedShipDate && previousShipDate !== updatedShipDate) {
+                  const { data: activeOrders, error: activeOrdersError } = await supabase
+                    .from('pending_orders')
+                    .select('id, ship_date, notes, created_at, updated_at, order_details')
+                    .eq('client_product_id', editingClientProduct.id)
+                    .in('status', queueStatuses)
+                    .order('created_at', { ascending: true })
+
+                  if (activeOrdersError) throw activeOrdersError
+
+                  const orders = activeOrders || []
+                  const oldDateOrders = orders.filter(order => order.ship_date === previousShipDate)
+                  const hasNewDateOrder = orders.some(order => order.ship_date === updatedShipDate)
+                  const autoNote = `Auto-reconciled after schedule date moved from ${previousShipDate} to ${updatedShipDate}.`
+
+                  if (oldDateOrders.length > 0) {
+                    if (!hasNewDateOrder) {
+                      const [orderToMove, ...duplicateOldOrders] = oldDateOrders
+                      const movedDetails = {
+                        ...(orderToMove.order_details || {}),
+                        ship_date: updatedShipDate
+                      }
+
+                      const { error: moveError } = await supabase
+                        .from('pending_orders')
+                        .update({
+                          ship_date: updatedShipDate,
+                          order_details: movedDetails
+                        })
+                        .eq('id', orderToMove.id)
+
+                      if (moveError) throw moveError
+
+                      if (duplicateOldOrders.length > 0) {
+                        const cancelIds = duplicateOldOrders.map(order => order.id)
+                        const { error: cancelError } = await supabase
+                          .from('pending_orders')
+                          .update({
+                            status: 'cancelled',
+                            notes: autoNote
+                          })
+                          .in('id', cancelIds)
+
+                        if (cancelError) throw cancelError
+                      }
+                    } else {
+                      const cancelIds = oldDateOrders.map(order => order.id)
+                      const { error: cancelError } = await supabase
+                        .from('pending_orders')
+                        .update({
+                          status: 'cancelled',
+                          notes: autoNote
+                        })
+                        .in('id', cancelIds)
+
+                      if (cancelError) throw cancelError
+                    }
+                  }
+                }
+
                 await fetchClientProducts(editingClientProduct.lead_id)
                 await fetchShippingSchedule()
+                await fetchPendingOrders()
                 setShowEditClientProductModal(false)
                 setEditingClientProduct(null)
               } catch (err) {
