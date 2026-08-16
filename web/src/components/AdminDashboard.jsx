@@ -16,6 +16,11 @@ const parseDateInput = (value) => {
   const raw = String(value).trim()
   if (!raw) return null
 
+  const normalizedRaw = raw
+    .replace(/^((?:\d{4})-(?:\d{2})-(?:\d{2}))\s+/, '$1T')
+    .replace(/([+-]\d{2})$/, '$1:00')
+    .replace(/([+-]\d{2})(\d{2})$/, '$1:$2')
+
   const isoDateMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/)
   if (isoDateMatch) {
     const [, year, month, day] = isoDateMatch
@@ -30,7 +35,7 @@ const parseDateInput = (value) => {
     return Number.isNaN(parsed.getTime()) ? null : parsed
   }
 
-  const fallback = new Date(raw)
+  const fallback = new Date(normalizedRaw)
   return Number.isNaN(fallback.getTime()) ? null : fallback
 }
 
@@ -38,6 +43,17 @@ const formatDisplayDate = (value) => {
   const date = parseDateInput(value)
   if (!date) return 'N/A'
   return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+}
+
+const formatShortDate = (value, fallback = 'N/A') => {
+  const date = parseDateInput(value)
+  if (!date) return fallback
+  return date.toLocaleDateString('en-US')
+}
+
+const getDateTimeValue = (value, fallback = 0) => {
+  const date = parseDateInput(value)
+  return date ? date.getTime() : fallback
 }
 
 const PRIOR_AUTH_STATUS_META = {
@@ -672,7 +688,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
   const sortTasksByDueDate = (firstTask, secondTask) => {
     if (!firstTask.due_date && !secondTask.due_date) {
-      return new Date(secondTask.created_at || 0) - new Date(firstTask.created_at || 0)
+      return getDateTimeValue(secondTask.created_at) - getDateTimeValue(firstTask.created_at)
     }
     if (!firstTask.due_date) return 1
     if (!secondTask.due_date) return -1
@@ -3203,7 +3219,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   {(() => {
                     // Get recent leads (last 5)
                     const recentLeads = [...leads].sort((a, b) => 
-                      new Date(b.created_at) - new Date(a.created_at)
+                      getDateTimeValue(b.created_at) - getDateTimeValue(a.created_at)
                     ).slice(0, 5)
                     
                     return recentLeads.length > 0 ? recentLeads.map((lead) => (
@@ -3216,7 +3232,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                           <p className="text-xs text-gray-500">{lead.email}</p>
                         </div>
                         <div className="text-xs text-gray-500">
-                          {new Date(lead.created_at).toLocaleDateString()}
+                          {formatShortDate(lead.created_at)}
                         </div>
                       </div>
                     )) : (
@@ -5398,7 +5414,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                           )}
                           {financialClaimsRows.map((row) => (
                             <tr key={row.id}>
-                              <td className="px-3 py-2 text-sm text-gray-700">{row.paid_date ? new Date(row.paid_date).toLocaleDateString() : 'N/A'}</td>
+                              <td className="px-3 py-2 text-sm text-gray-700">{formatShortDate(row.paid_date)}</td>
                               <td className="px-3 py-2 text-sm text-gray-900">{row.claim_id || 'N/A'}</td>
                               <td className="px-3 py-2 text-sm text-gray-900">{row.patient_name || 'N/A'}</td>
                               <td className="px-3 py-2 text-sm text-gray-700">{row.payer || 'N/A'}</td>
@@ -5435,7 +5451,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                           )}
                           {financialOpsRows.map((row) => (
                             <tr key={row.id}>
-                              <td className="px-3 py-2 text-sm text-gray-700">{row.entry_date ? new Date(row.entry_date).toLocaleDateString() : 'N/A'}</td>
+                              <td className="px-3 py-2 text-sm text-gray-700">{formatShortDate(row.entry_date)}</td>
                               <td className="px-3 py-2 text-sm text-gray-900 capitalize">{row.entry_type || 'expense'}</td>
                               <td className="px-3 py-2 text-sm text-gray-700">{row.category || 'N/A'}</td>
                               <td className="px-3 py-2 text-sm text-gray-900">{row.description || 'N/A'}</td>
@@ -5537,7 +5553,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                         {expenses.map((expense) => (
                           <tr key={expense.id} className="hover:bg-gray-50">
                             <td className="px-4 py-3 text-sm text-gray-700">
-                              {new Date(expense.date).toLocaleDateString()}
+                              {formatShortDate(expense.date)}
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900">{expense.description}</td>
                             <td className="px-4 py-3 text-sm text-gray-700">
@@ -7618,7 +7634,11 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                       <div className="text-sm font-medium text-blue-900 mb-1">Next Shipment Date:</div>
                       <div className="text-lg font-bold text-blue-700">
                         {(() => {
-                          const shippedDate = new Date(selectedClient.date_shipped)
+                          const shippedDate = parseDateInput(selectedClient.date_shipped)
+                          if (!shippedDate) {
+                            return <span className="text-gray-600">No future shipment scheduled</span>
+                          }
+
                           const today = new Date()
                           today.setHours(0, 0, 0, 0)
                           const shippedDateOnly = new Date(shippedDate)
