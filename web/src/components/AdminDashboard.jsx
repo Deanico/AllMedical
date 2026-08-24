@@ -205,7 +205,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     zip_code: '',
     phone: ''
   })
-  const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', insurance: '', insurance_id: '', insurance_group_number: '', insurance_cardholder_name: '', insurance_cardholder_relationship: '', insurance_card_front_url: '', insurance_card_back_url: '', insurance_card_front_file: null, insurance_card_back_file: null, insurance_card_front_removed: false, insurance_card_back_removed: false, insurance_deductible: '', insurance_oop_max: '', birthday: '', address_line1: '', city: '', state: '', zip_code: '', shipping_duration: '', payment_status: '', prior_auth_status: '', prior_auth_start_date: '', prior_auth_end_date: '', is_paused: false })
+  const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', insurance: '', insurance_id: '', insurance_group_number: '', insurance_cardholder_name: '', insurance_cardholder_relationship: '', insurance_card_front_url: '', insurance_card_back_url: '', insurance_card_front_file: null, insurance_card_back_file: null, insurance_card_front_removed: false, insurance_card_back_removed: false, insurance_deductible: '', insurance_oop_max: '', birthday: '', address_line1: '', city: '', state: '', zip_code: '', shipping_duration: '', payment_status: '', prior_auth_status: '', prior_auth_start_date: '', prior_auth_end_date: '', is_paused: false, auto_ship_enabled: false })
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState(null)
   const [financialSyncing, setFinancialSyncing] = useState(false)
@@ -2196,7 +2196,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         prior_auth_status: editForm.prior_auth_status || null,
         prior_auth_start_date: editForm.prior_auth_start_date || null,
         prior_auth_end_date: editForm.prior_auth_end_date || null,
-        is_paused: Boolean(editForm.is_paused)
+        is_paused: Boolean(editForm.is_paused),
+        auto_ship_enabled: Boolean(editForm.auto_ship_enabled)
       }
 
       if (editForm.payment_status) {
@@ -2261,7 +2262,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       prior_auth_status: selectedClient.prior_auth_status || '',
       prior_auth_start_date: selectedClient.prior_auth_start_date || '',
       prior_auth_end_date: selectedClient.prior_auth_end_date || '',
-      is_paused: Boolean(selectedClient.is_paused)
+      is_paused: Boolean(selectedClient.is_paused),
+      auto_ship_enabled: Boolean(selectedClient.auto_ship_enabled)
     })
     setShowEditClientModal(true)
   }
@@ -7321,6 +7323,22 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                     className="h-4 w-4"
                   />
                   Paused Client
+                </label>
+              </div>
+              <div className="border-t pt-4">
+                <label className="flex items-start gap-2 text-sm font-medium text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={editForm.auto_ship_enabled}
+                    onChange={(e) => setEditForm({ ...editForm, auto_ship_enabled: e.target.checked })}
+                    className="h-4 w-4 mt-0.5"
+                  />
+                  <span>
+                    <span className="block">Auto-Ship 80-Day Cycle</span>
+                    <span className="block text-xs font-normal text-gray-500 mt-1">
+                      When enabled, ordering any assigned product schedules its next shipment exactly 80 days later.
+                    </span>
+                  </span>
                 </label>
               </div>
               
