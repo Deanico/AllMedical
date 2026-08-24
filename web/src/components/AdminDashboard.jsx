@@ -205,7 +205,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     zip_code: '',
     phone: ''
   })
-  const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', insurance: '', insurance_id: '', insurance_deductible: '', insurance_oop_max: '', birthday: '', address_line1: '', city: '', state: '', zip_code: '', shipping_duration: '', payment_status: '', prior_auth_status: '', prior_auth_start_date: '', prior_auth_end_date: '', is_paused: false })
+  const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', insurance: '', insurance_id: '', insurance_group_number: '', insurance_cardholder_name: '', insurance_cardholder_relationship: '', insurance_card_front_url: '', insurance_card_back_url: '', insurance_card_front_file: null, insurance_card_back_file: null, insurance_card_front_removed: false, insurance_card_back_removed: false, insurance_deductible: '', insurance_oop_max: '', birthday: '', address_line1: '', city: '', state: '', zip_code: '', shipping_duration: '', payment_status: '', prior_auth_status: '', prior_auth_start_date: '', prior_auth_end_date: '', is_paused: false })
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState(null)
   const [financialSyncing, setFinancialSyncing] = useState(false)
@@ -2130,12 +2130,61 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     try {
       // Format birthday to include time at noon UTC to prevent timezone shift issues
       const birthdayValue = editForm.birthday ? `${editForm.birthday}T12:00:00` : null;
+      const removeInsuranceCard = async (url) => {
+        if (!url) return
+
+        const marker = '/storage/v1/object/public/insurance-cards/'
+        const markerIndex = url.indexOf(marker)
+        if (markerIndex === -1) return
+
+        const filePath = decodeURIComponent(url.slice(markerIndex + marker.length))
+        const { error: removeError } = await supabase
+          .storage
+          .from('insurance-cards')
+          .remove([filePath])
+
+        if (removeError) throw removeError
+      }
+      const uploadInsuranceCard = async (file, side) => {
+        const isRemoved = editForm[`insurance_card_${side}_removed`]
+        const existingUrl = editForm[`insurance_card_${side}_url`]
+        if (isRemoved && existingUrl) await removeInsuranceCard(existingUrl)
+        if (isRemoved) return null
+        if (!file) return existingUrl || null
+
+        const fileExt = file.name.split('.').pop()?.toLowerCase() || 'jpg'
+        const filePath = `${selectedClient.id}/${side}-${Date.now()}.${fileExt}`
+        const { error: uploadError } = await supabase
+          .storage
+          .from('insurance-cards')
+          .upload(filePath, file, { cacheControl: '3600', upsert: true })
+
+        if (uploadError) throw uploadError
+
+        const { data: { publicUrl } } = supabase
+          .storage
+          .from('insurance-cards')
+          .getPublicUrl(filePath)
+
+        return publicUrl
+      }
+
+      const [insuranceCardFrontUrl, insuranceCardBackUrl] = await Promise.all([
+        uploadInsuranceCard(editForm.insurance_card_front_file, 'front'),
+        uploadInsuranceCard(editForm.insurance_card_back_file, 'back')
+      ])
+
       const updatePayload = {
         name: editForm.name,
         email: editForm.email,
         phone: editForm.phone,
         insurance: editForm.insurance,
         insurance_id: editForm.insurance_id || null,
+        insurance_group_number: editForm.insurance_group_number || null,
+        insurance_cardholder_name: editForm.insurance_cardholder_name || null,
+        insurance_cardholder_relationship: editForm.insurance_cardholder_relationship || null,
+        insurance_card_front_url: insuranceCardFrontUrl,
+        insurance_card_back_url: insuranceCardBackUrl,
         insurance_deductible: editForm.insurance_deductible ? parseFloat(editForm.insurance_deductible) : null,
         insurance_oop_max: editForm.insurance_oop_max ? parseFloat(editForm.insurance_oop_max) : null,
         birthday: birthdayValue,
@@ -2191,6 +2240,15 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       phone: selectedClient.phone,
       insurance: selectedClient.insurance,
       insurance_id: selectedClient.insurance_id || '',
+      insurance_group_number: selectedClient.insurance_group_number || '',
+      insurance_cardholder_name: selectedClient.insurance_cardholder_name || '',
+      insurance_cardholder_relationship: selectedClient.insurance_cardholder_relationship || '',
+      insurance_card_front_url: selectedClient.insurance_card_front_url || '',
+      insurance_card_back_url: selectedClient.insurance_card_back_url || '',
+      insurance_card_front_file: null,
+      insurance_card_back_file: null,
+      insurance_card_front_removed: false,
+      insurance_card_back_removed: false,
       insurance_deductible: selectedClient.insurance_deductible?.toString() || '',
       insurance_oop_max: selectedClient.insurance_oop_max?.toString() || '',
       birthday: birthdayValue,
@@ -3777,6 +3835,26 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                             Group #
                           </label>
                           <div className="text-sm sm:text-base text-gray-900">{selectedClient.insurance_group_number}</div>
+                        </div>
+                      )}
+
+                      {(selectedClient.insurance_card_front_url || selectedClient.insurance_card_back_url) && (
+                        <div>
+                          <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                            Insurance Card Images
+                          </label>
+                          <div className="flex gap-3 text-sm">
+                            {selectedClient.insurance_card_front_url && (
+                              <a href={selectedClient.insurance_card_front_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">
+                                View front
+                              </a>
+                            )}
+                            {selectedClient.insurance_card_back_url && (
+                              <a href={selectedClient.insurance_card_back_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">
+                                View back
+                              </a>
+                            )}
+                          </div>
                         </div>
                       )}
 
@@ -7406,6 +7484,109 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="e.g., XYZ123456789"
                 />
+              </div>
+              <div className="border-t pt-4">
+                <h4 className="text-sm font-semibold text-gray-700 mb-3">Insurance Card</h4>
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Group Number
+                      </label>
+                      <input
+                        type="text"
+                        value={editForm.insurance_group_number}
+                        onChange={(e) => setEditForm({ ...editForm, insurance_group_number: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Cardholder Relationship
+                      </label>
+                      <select
+                        value={editForm.insurance_cardholder_relationship}
+                        onChange={(e) => setEditForm({ ...editForm, insurance_cardholder_relationship: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="">Select relationship</option>
+                        <option value="self">Self</option>
+                        <option value="parent">Parent</option>
+                        <option value="spouse">Spouse</option>
+                        <option value="other">Other</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Cardholder Name
+                    </label>
+                    <input
+                      type="text"
+                      value={editForm.insurance_cardholder_name}
+                      onChange={(e) => setEditForm({ ...editForm, insurance_cardholder_name: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Name as shown on card"
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Card Front
+                      </label>
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        onChange={(e) => setEditForm({ ...editForm, insurance_card_front_file: e.target.files?.[0] || null })}
+                        className="w-full text-sm text-gray-600"
+                      />
+                      {editForm.insurance_card_front_url && (
+                        <div className="flex items-center gap-2 mt-1">
+                          <a href={editForm.insurance_card_front_url} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline">
+                            View saved front
+                          </a>
+                          <button
+                            type="button"
+                            aria-label="Remove saved insurance card front"
+                            title="Remove saved front"
+                            onClick={() => setEditForm({ ...editForm, insurance_card_front_url: '', insurance_card_front_file: null, insurance_card_front_removed: true })}
+                            className="text-red-600 hover:text-red-800 text-sm leading-none"
+                          >
+                            🗑
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Card Back
+                      </label>
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        onChange={(e) => setEditForm({ ...editForm, insurance_card_back_file: e.target.files?.[0] || null })}
+                        className="w-full text-sm text-gray-600"
+                      />
+                      {editForm.insurance_card_back_url && (
+                        <div className="flex items-center gap-2 mt-1">
+                          <a href={editForm.insurance_card_back_url} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline">
+                            View saved back
+                          </a>
+                          <button
+                            type="button"
+                            aria-label="Remove saved insurance card back"
+                            title="Remove saved back"
+                            onClick={() => setEditForm({ ...editForm, insurance_card_back_url: '', insurance_card_back_file: null, insurance_card_back_removed: true })}
+                            className="text-red-600 hover:text-red-800 text-sm leading-none"
+                          >
+                            🗑
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500">Upload JPG, PNG, or WebP images. Saving without a new image keeps the existing card image.</p>
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
