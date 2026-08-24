@@ -12,30 +12,18 @@ export const calculateInsuranceProjection = ({
   const monthlyBreakdown = []
 
   for (let month = 1; month <= months; month++) {
-    let insurancePayment
-    let patientPayment
-
-    if (oopMax > 0 && patientOOPTotal >= oopMax) {
-      insurancePayment = allowableAmount
-      patientPayment = 0
-    } else {
-      insurancePayment = allowableAmount * (percentOfAllowable / 100)
-      patientPayment = allowableAmount - insurancePayment
-    }
+    const deductibleApplied = Math.min(allowableAmount, Math.max(0, remainingDeductible))
+    const afterDeductibleAmount = allowableAmount - deductibleApplied
+    const oopReached = oopMax > 0 && patientOOPTotal >= oopMax
+    const insurancePayment = oopReached
+      ? afterDeductibleAmount
+      : afterDeductibleAmount * (percentOfAllowable / 100)
+    const patientPayment = deductibleApplied + afterDeductibleAmount - insurancePayment
 
     patientOOPTotal += patientPayment
 
-    let monthRevenue = 0
-    if (remainingDeductible > 0) {
-      if (insurancePayment >= remainingDeductible) {
-        monthRevenue = insurancePayment - remainingDeductible
-        remainingDeductible = 0
-      } else {
-        remainingDeductible -= insurancePayment
-      }
-    } else {
-      monthRevenue = insurancePayment
-    }
+    remainingDeductible -= deductibleApplied
+    const monthRevenue = insurancePayment
 
     totalRevenue += monthRevenue
     monthlyBreakdown.push({
@@ -43,6 +31,7 @@ export const calculateInsuranceProjection = ({
       insurancePayment,
       patientPayment,
       monthRevenue,
+      deductibleApplied,
       remainingDeductible: Math.max(0, remainingDeductible),
       oopReached: oopMax > 0 && patientOOPTotal >= oopMax
     })
