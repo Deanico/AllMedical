@@ -8,7 +8,6 @@ export default function ClientPortalAuth({ onLogin }) {
   const [mode, setMode] = useState('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [fullName, setFullName] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
@@ -56,37 +55,6 @@ export default function ClientPortalAuth({ onLogin }) {
     setLoading(false)
   }
 
-  const handleRegister = async (e) => {
-    e.preventDefault()
-    resetFeedback()
-
-    if (!supabase) {
-      setError('Portal is not configured yet. Please contact support.')
-      return
-    }
-
-    setLoading(true)
-    const { error: signUpError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          full_name: fullName
-        }
-      }
-    })
-
-    if (signUpError) {
-      setError(signUpError.message || 'Unable to create account. Please try again.')
-      setLoading(false)
-      return
-    }
-
-    setMessage('Account created. Check your email to confirm and then sign in.')
-    setMode('login')
-    setLoading(false)
-  }
-
   const handleForgotPassword = async (e) => {
     e.preventDefault()
     resetFeedback()
@@ -113,7 +81,6 @@ export default function ClientPortalAuth({ onLogin }) {
   }
 
   const isLogin = mode === 'login'
-  const isRegister = mode === 'register'
   const isForgot = mode === 'forgot'
 
   return (
@@ -124,7 +91,6 @@ export default function ClientPortalAuth({ onLogin }) {
           <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 mt-2">Client Portal</h1>
           <p className="text-sm text-slate-600 mt-2">
             {isLogin && 'Sign in to view your shipment schedule and product details.'}
-            {isRegister && 'Create your portal account to access your shipping timeline.'}
             {isForgot && 'Enter your email to reset your password.'}
           </p>
           {isLogin && (
@@ -180,51 +146,6 @@ export default function ClientPortalAuth({ onLogin }) {
           </form>
         )}
 
-        {isRegister && (
-          <form onSubmit={handleRegister} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Full Name</label>
-              <input
-                type="text"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                placeholder="Jane Doe"
-                className="w-full px-4 py-3"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Email</label>
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                className="w-full px-4 py-3"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Password</label>
-              <input
-                type="password"
-                required
-                minLength={6}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="At least 6 characters"
-                className="w-full px-4 py-3"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full portal-primary-btn"
-            >
-              {loading ? 'Creating account...' : 'Create Account'}
-            </button>
-          </form>
-        )}
-
         {isForgot && (
           <form onSubmit={handleForgotPassword} className="space-y-4">
             <div>
@@ -253,31 +174,11 @@ export default function ClientPortalAuth({ onLogin }) {
             type="button"
             onClick={() => {
               resetFeedback()
-              setMode('register')
-            }}
-            className="portal-secondary-btn"
-          >
-            Register
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              resetFeedback()
               setMode('forgot')
             }}
             className="portal-secondary-btn"
           >
             Forgot Password
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              resetFeedback()
-              setMode('register')
-            }}
-            className="portal-secondary-btn"
-          >
-            Create Account
           </button>
           {!isLogin && (
             <button

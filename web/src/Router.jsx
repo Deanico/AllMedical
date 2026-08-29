@@ -3,11 +3,12 @@ import App from './App'
 import AdminLogin from './components/AdminLogin'
 import AdminDashboard from './components/AdminDashboard'
 import ClientPortalAuth from './components/ClientPortalAuth'
+import ClientPortalActivation from './components/ClientPortalActivation'
 import ClientPortalDashboard from './components/ClientPortalDashboard'
 import { supabase } from './lib/supabaseClient'
 
 export default function Router() {
-  const [view, setView] = useState('public') // 'public', 'adminLogin', 'adminDashboard', 'clientLogin', 'clientDashboard'
+  const [view, setView] = useState('public') // 'public', 'adminLogin', 'adminDashboard', 'clientLogin', 'clientActivation', 'clientDashboard'
   const [adminEmail, setAdminEmail] = useState(null)
   const [clientUser, setClientUser] = useState(null)
   const [ready, setReady] = useState(false)
@@ -60,7 +61,7 @@ export default function Router() {
           const user = data?.session?.user || null
           if (mounted) {
             setClientUser(user)
-            setView(user ? 'clientDashboard' : 'clientLogin')
+            setView(user ? 'clientActivation' : 'clientLogin')
             setReady(true)
           }
         } else if (mounted) {
@@ -82,7 +83,7 @@ export default function Router() {
       if (window.location.pathname === '/portal') {
         const user = session?.user || null
         setClientUser(user)
-        setView(user ? 'clientDashboard' : 'clientLogin')
+        setView(user ? 'clientActivation' : 'clientLogin')
       }
     })
 
@@ -103,7 +104,7 @@ export default function Router() {
         }
       } else if (window.location.pathname === '/portal') {
         if (clientUser) {
-          setView('clientDashboard')
+          setView('clientActivation')
         } else {
           setView('clientLogin')
         }
@@ -135,7 +136,7 @@ export default function Router() {
     if (user?.isDemo) {
       sessionStorage.setItem('clientDemoAuth', JSON.stringify(user))
     }
-    setView('clientDashboard')
+    setView(user?.isDemo ? 'clientDashboard' : 'clientActivation')
     window.history.pushState({}, '', '/portal')
   }
 
@@ -156,7 +157,7 @@ export default function Router() {
   }
 
   const goToPortal = () => {
-    setView(clientUser ? 'clientDashboard' : 'clientLogin')
+    setView(clientUser ? 'clientActivation' : 'clientLogin')
     window.history.pushState({}, '', '/portal')
   }
 
@@ -180,6 +181,10 @@ export default function Router() {
 
   if (view === 'clientLogin') {
     return <ClientPortalAuth onLogin={handleClientLogin} />
+  }
+
+  if (view === 'clientActivation') {
+    return <ClientPortalActivation user={clientUser} onActivated={() => setView('clientDashboard')} onLogout={handleClientLogout} />
   }
 
   if (view === 'clientDashboard') {

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import ClientPortalDashboard from './ClientPortalDashboard'
+import ClientClaimsPanel from './ClientClaimsPanel'
 import { generatePhysicianOrder, downloadPDF, getPhysicianOrderSupplierLabel } from '../lib/generatePhysicianOrder'
 import { generateTreatmentRecords, getTreatmentRecordSupplierLabel } from '../lib/generateTreatmentRecords'
 import { generateHardshipForm } from '../lib/generateHardshipForm'
@@ -55,6 +56,14 @@ const getDateTimeValue = (value, fallback = 0) => {
   const date = parseDateInput(value)
   return date ? date.getTime() : fallback
 }
+
+const CLIENT_DETAIL_TABS = [
+  { key: 'overview', label: 'Overview' },
+  { key: 'products', label: 'Products & Shipping' },
+  { key: 'financial', label: 'Financial' },
+  { key: 'claims', label: 'Claims & EOBs' },
+  { key: 'documents', label: 'Documents' }
+]
 
 const PRIOR_AUTH_STATUS_META = {
   requested: {
@@ -186,6 +195,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const [activeTab, setActiveTab] = useState('leads')
   const [leads, setLeads] = useState([])
   const [selectedClient, setSelectedClient] = useState(null)
+  const [activeClientTab, setActiveClientTab] = useState('overview')
   const [doctors, setDoctors] = useState([])
   const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState(false)
@@ -722,6 +732,10 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       fetchFinancialReportsData()
     }
   }, [activeView])
+
+  useEffect(() => {
+    setActiveClientTab('overview')
+  }, [selectedClient?.id])
 
   useEffect(() => {
     if (!supabase) return
@@ -2295,13 +2309,25 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
       const { error: updateError } = await supabase
         .from('leads')
-        .update({ portal_invited_at: inviteTimestamp })
+        .update({
+          portal_invited_at: inviteTimestamp,
+          portal_accepted_at: null,
+          portal_terms_accepted_at: null,
+          portal_terms_version: null,
+          portal_privacy_notice_version: null,
+          portal_auth_user_id: null
+        })
         .eq('id', selectedClient.id)
 
       if (!updateError) {
         const updatedClient = {
           ...selectedClient,
-          portal_invited_at: inviteTimestamp
+          portal_invited_at: inviteTimestamp,
+          portal_accepted_at: null,
+          portal_terms_accepted_at: null,
+          portal_terms_version: null,
+          portal_privacy_notice_version: null,
+          portal_auth_user_id: null
         }
 
         setSelectedClient(updatedClient)
@@ -2320,9 +2346,12 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       })
     } catch (error) {
       console.error('Error sending portal invite:', error)
+      const isEmailRateLimited = error?.message?.toLowerCase().includes('email rate limit exceeded')
       setPortalInviteMessage({
         type: 'error',
-        text: error?.message || 'Failed to send portal invite.'
+        text: isEmailRateLimited
+          ? 'Supabase has temporarily limited invitation emails because too many were sent. Wait before sending another invite, or increase the Auth email rate limit in Supabase Dashboard.'
+          : error?.message || 'Failed to send portal invite.'
       })
     } finally {
       setPortalInviteSending(false)
@@ -3761,7 +3790,69 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                     </div>
                   )}
 
+                  {selectedClient.insurance_update_review_status === 'pending' && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <div>
+                          <p className="text-sm font-semibold text-amber-900">Insurance Update Request Pending</p>
+                          {selectedClient.insurance_update_requested_at && (
+                            <p className="text-xs text-amber-700 mt-1">Requested: {formatDate(selectedClient.insurance_update_requested_at)}</p>
+                          )}
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={handleApproveInsuranceUpdate}
+                            disabled={updating}
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 text-white rounded text-xs font-semibold"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={handleRejectInsuranceUpdate}
+                            disabled={updating}
+                            className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 disabled:bg-gray-400 text-white rounded text-xs font-semibold"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </div>
+                      <div className="mt-3 grid sm:grid-cols-3 gap-3 text-xs sm:text-sm">
+                        <div>
+                          <p className="font-medium text-amber-800">Requested Insurance</p>
+                          <p className="text-amber-900">{selectedClient.pending_insurance_provider || 'N/A'}</p>
+                        </div>
+                        <div>
+                          <p className="font-medium text-amber-800">Requested Member ID</p>
+                          <p className="text-amber-900">{selectedClient.pending_insurance_member_id || 'N/A'}</p>
+                        </div>
+                        <div>
+                          <p className="font-medium text-amber-800">Requested Group #</p>
+                          <p className="text-amber-900">{selectedClient.pending_insurance_group_number || 'N/A'}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Client Detail Tabs */}
+                  <div className="flex flex-wrap gap-1 border-b border-gray-200">
+                    {CLIENT_DETAIL_TABS.map((tab) => (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        onClick={() => setActiveClientTab(tab.key)}
+                        className={`px-3 py-2 text-sm font-medium rounded-t-md border-b-2 -mb-px transition-colors ${
+                          activeClientTab === tab.key
+                            ? 'border-blue-600 text-blue-700 bg-blue-50'
+                            : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+
                   {/* Two Column Layout for Basic Info */}
+                  {activeClientTab === 'overview' && (
                   <div className="grid md:grid-cols-2 gap-4 sm:gap-6">
                     {/* Left Column - Contact & Address */}
                     <div className="space-y-3 sm:space-y-4">
@@ -3928,52 +4019,11 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                       </div>
                     </div>
                   </div>
+                  )}
 
                   {/* Full Width Fields */}
                   <div className="space-y-4 border-t pt-4">
-                    {selectedClient.insurance_update_review_status === 'pending' && (
-                      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-                        <div className="flex items-center justify-between gap-3 flex-wrap">
-                          <div>
-                            <p className="text-sm font-semibold text-amber-900">Insurance Update Request Pending</p>
-                            {selectedClient.insurance_update_requested_at && (
-                              <p className="text-xs text-amber-700 mt-1">Requested: {formatDate(selectedClient.insurance_update_requested_at)}</p>
-                            )}
-                          </div>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={handleApproveInsuranceUpdate}
-                              disabled={updating}
-                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 text-white rounded text-xs font-semibold"
-                            >
-                              Approve
-                            </button>
-                            <button
-                              onClick={handleRejectInsuranceUpdate}
-                              disabled={updating}
-                              className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 disabled:bg-gray-400 text-white rounded text-xs font-semibold"
-                            >
-                              Reject
-                            </button>
-                          </div>
-                        </div>
-                        <div className="mt-3 grid sm:grid-cols-3 gap-3 text-xs sm:text-sm">
-                          <div>
-                            <p className="font-medium text-amber-800">Requested Insurance</p>
-                            <p className="text-amber-900">{selectedClient.pending_insurance_provider || 'N/A'}</p>
-                          </div>
-                          <div>
-                            <p className="font-medium text-amber-800">Requested Member ID</p>
-                            <p className="text-amber-900">{selectedClient.pending_insurance_member_id || 'N/A'}</p>
-                          </div>
-                          <div>
-                            <p className="font-medium text-amber-800">Requested Group #</p>
-                            <p className="text-amber-900">{selectedClient.pending_insurance_group_number || 'N/A'}</p>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
+                    {activeClientTab === 'overview' && (
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Product Needed
@@ -3985,6 +4035,18 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                         className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                         rows="3"
                       />
+                    </div>
+                    )}
+
+                    {activeClientTab === 'products' && (
+                    <>
+                    <div>
+                      <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                        Auto-Ship 80-Day Cycle
+                      </label>
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${selectedClient.auto_ship_enabled ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-600'}`}>
+                        {selectedClient.auto_ship_enabled ? 'Enabled' : 'Disabled'}
+                      </span>
                     </div>
 
                     {/* Assigned Products Section */}
@@ -4119,7 +4181,11 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                         className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                     </div>
+                    </>
+                    )}
 
+                    {activeClientTab === 'financial' && (
+                    <>
                     {/* Payment Calculator Section */}
                     <div className="border-t pt-4">
                       <div className="flex items-center justify-between mb-3">
@@ -4268,7 +4334,17 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                         </div>
                       )}
                     </div>
+                    </>
+                    )}
 
+                    {activeClientTab === 'claims' && (
+                    <div className="border-t pt-4">
+                      <ClientClaimsPanel client={selectedClient} />
+                    </div>
+                    )}
+
+                    {activeClientTab === 'documents' && (
+                    <>
                     {/* Doctors Section */}
                     <div className="border-t pt-4">
                       <div className="flex items-center justify-between mb-3">
@@ -4890,8 +4966,10 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                          'Patient DOB required'}
                       </p>
                     )}
+                    </>
+                    )}
 
-                    {selectedClient.notes && (
+                    {activeClientTab === 'overview' && selectedClient.notes && (
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                           Notes

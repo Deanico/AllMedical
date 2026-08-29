@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
+const PORTAL_TERMS_VERSION = '2026-08-25'
+const PORTAL_PRIVACY_NOTICE_VERSION = '2026-08-25'
+
 const formatDate = (value) => {
   if (!value) return 'Not scheduled'
   const date = new Date(value)
@@ -54,6 +57,7 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
   const [showPasswordSetup, setShowPasswordSetup] = useState(false)
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [hasAcceptedLegalTerms, setHasAcceptedLegalTerms] = useState(false)
   const [passwordSaving, setPasswordSaving] = useState(false)
   const [passwordMessage, setPasswordMessage] = useState(null)
   const [showEditAccount, setShowEditAccount] = useState(false)
@@ -87,7 +91,7 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
       try {
         const { data: clientData, error: clientError } = await supabase
           .from('leads')
-          .select('id, name, email, phone, insurance, address_line1, city, state, zip_code')
+          .select('id, name, email, phone, insurance, address_line1, city, state, zip_code, portal_terms_accepted_at, portal_terms_version, portal_privacy_notice_version')
           .ilike('email', user.email)
           .limit(1)
 
@@ -103,26 +107,6 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
             setError('Your login is active, but your client account is not linked yet. Please contact support.')
           }
           return
-        }
-
-        let resolvedClient = matchedClient
-
-        // Best-effort accepted tracking; this is skipped if schema migration has not been applied yet.
-        try {
-          const acceptedAt = new Date().toISOString()
-          const { error: acceptanceError } = await supabase
-            .from('leads')
-            .update({ portal_accepted_at: acceptedAt })
-            .eq('id', matchedClient.id)
-
-          if (!acceptanceError) {
-            resolvedClient = {
-              ...matchedClient,
-              portal_accepted_at: acceptedAt
-            }
-          }
-        } catch {
-          // Ignore tracking failures to keep portal usable before migration.
         }
 
         const { data: productsData, error: productsError } = await supabase
@@ -178,7 +162,7 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
         if (ordersError) throw ordersError
 
         if (!cancelled) {
-          setClient(resolvedClient)
+          setClient(matchedClient)
           setClientProducts(productsData || [])
           setClientOrders(ordersData || [])
         }
@@ -330,6 +314,11 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
     })
   }, [client])
 
+  const requiresLegalAcceptance =
+    !client?.portal_terms_accepted_at ||
+    client.portal_terms_version !== PORTAL_TERMS_VERSION ||
+    client.portal_privacy_notice_version !== PORTAL_PRIVACY_NOTICE_VERSION
+
   const handleSetPassword = async (e) => {
     e.preventDefault()
     setPasswordMessage(null)
@@ -344,6 +333,11 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
       return
     }
 
+    if (requiresLegalAcceptance && !hasAcceptedLegalTerms) {
+      setPasswordMessage({ type: 'error', text: 'You must agree to the Terms of Service and acknowledge the Privacy Notice before setting your password.' })
+      return
+    }
+
     if (!supabase) {
       setPasswordMessage({ type: 'error', text: 'Portal auth is not configured.' })
       return
@@ -354,9 +348,27 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
       const { error: updateError } = await supabase.auth.updateUser({ password: newPassword })
       if (updateError) throw updateError
 
+      if (requiresLegalAcceptance) {
+        const acceptedAt = new Date().toISOString()
+        const { error: acceptanceError } = await supabase
+          .from('leads')
+          .update({
+            portal_accepted_at: acceptedAt,
+            portal_terms_accepted_at: acceptedAt,
+            portal_terms_version: PORTAL_TERMS_VERSION,
+            portal_privacy_notice_version: PORTAL_PRIVACY_NOTICE_VERSION,
+            portal_auth_user_id: user?.id || null
+          })
+          .eq('id', client.id)
+
+        if (acceptanceError) throw acceptanceError
+        setClient((currentClient) => ({ ...currentClient, portal_terms_accepted_at: acceptedAt }))
+      }
+
       setPasswordMessage({ type: 'success', text: 'Password updated. You can now use email and password sign-in.' })
       setNewPassword('')
       setConfirmPassword('')
+      setHasAcceptedLegalTerms(false)
       setShowPasswordSetup(false)
     } catch (updateError) {
       setPasswordMessage({ type: 'error', text: updateError.message || 'Failed to update password.' })
@@ -569,8 +581,12 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
         {!previewMode && showPasswordSetup && (
           <div className="portal-auth-card p-6">
             <h2 className="text-lg font-bold text-slate-900 mb-1">Set Password</h2>
-            <p className="text-sm text-slate-600 mb-4">If you used an email invite link, set a password here for future sign-ins.</p>
-            <form onSubmit={handleSetPassword} className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+            <p className="text-sm text-slate-600 mb-4">
+              {requiresLegalAcceptance
+                ? 'Set a password for future sign-ins and review the portal terms.'
+                : 'Set a new password for future sign-ins.'}
+            </p>
+            <form onSubmit={handleSetPassword} className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">New Password</label>
                 <input
@@ -593,6 +609,23 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
                   className="w-full px-4 py-3"
                 />
               </div>
+              {requiresLegalAcceptance && (
+                <label className="sm:col-span-2 flex items-start gap-3 text-sm leading-5 text-slate-600">
+                  <input
+                    type="checkbox"
+                    required
+                    checked={hasAcceptedLegalTerms}
+                    onChange={(e) => setHasAcceptedLegalTerms(e.target.checked)}
+                    className="mt-1 h-4 w-4 shrink-0"
+                  />
+                  <span>
+                    I agree to the{' '}
+                    <a href="/terms-of-service.html" target="_blank" rel="noreferrer" className="font-medium text-sky-700 underline">Terms of Service</a>{' '}
+                    and acknowledge the{' '}
+                    <a href="/privacy-notice.html" target="_blank" rel="noreferrer" className="font-medium text-sky-700 underline">Privacy Notice</a>.
+                  </span>
+                </label>
+              )}
               <button type="submit" disabled={passwordSaving} className="portal-primary-btn">
                 {passwordSaving ? 'Saving...' : 'Save Password'}
               </button>
