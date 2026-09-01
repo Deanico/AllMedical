@@ -248,6 +248,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const [showSuccessModal, setShowSuccessModal] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [clientSearchQuery, setClientSearchQuery] = useState('')
+  const [clientSearchField, setClientSearchField] = useState('all')
   const [insuranceFilter, setInsuranceFilter] = useState('')
   const [productFilter, setProductFilter] = useState('')
   const [stateFilter, setStateFilter] = useState('')
@@ -3536,12 +3537,23 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                 <div className="space-y-2">
                   <input
                     type="text"
-                    placeholder="Search clients (name, email, phone)..."
+                    placeholder="Search clients..."
                     value={clientSearchQuery}
                     onChange={(e) => setClientSearchQuery(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                   />
-                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-2">
+                    <select
+                      value={clientSearchField}
+                      onChange={(e) => setClientSearchField(e.target.value)}
+                      className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    >
+                      <option value="all">Search: All Details</option>
+                      <option value="name">Search: Name</option>
+                      <option value="email">Search: Email</option>
+                      <option value="phone">Search: Phone</option>
+                      <option value="address">Search: Address</option>
+                    </select>
                     <select
                       value={clientStatusFilter}
                       onChange={(e) => {
@@ -3626,11 +3638,20 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   // Search filter
                   if (clientSearchQuery) {
                     const query = clientSearchQuery.toLowerCase();
-                    filtered = filtered.filter(client => 
-                      client.name?.toLowerCase().includes(query) ||
-                      client.email?.toLowerCase().includes(query) ||
-                      client.phone?.toLowerCase().includes(query)
-                    );
+                    filtered = filtered.filter(client => {
+                      const searchableFields = {
+                        name: client.name,
+                        email: client.email,
+                        phone: client.phone,
+                        address: [client.address_line1, client.city, client.state, client.zip_code].filter(Boolean).join(' ')
+                      }
+
+                      if (clientSearchField === 'all') {
+                        return Object.values(searchableFields).some(value => value?.toLowerCase().includes(query))
+                      }
+
+                      return searchableFields[clientSearchField]?.toLowerCase().includes(query)
+                    });
                   }
                   
                   // Insurance filter
