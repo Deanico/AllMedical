@@ -6,7 +6,7 @@ const PORTAL_PRIVACY_NOTICE_VERSION = '2026-08-25'
 
 const formatDate = (value) => {
   if (!value) return 'Not scheduled'
-  const date = new Date(value)
+  const date = new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00` : value)
   if (Number.isNaN(date.getTime())) return 'Not scheduled'
   return date.toLocaleDateString('en-US', {
     year: 'numeric',
@@ -77,6 +77,7 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
 
   useEffect(() => {
     let cancelled = false
+    let clientProductsChannel = null
 
     const fetchClientData = async () => {
       if (!supabase || !user?.email) {
@@ -91,7 +92,7 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
       try {
         const { data: clientData, error: clientError } = await supabase
           .from('leads')
-          .select('id, name, email, phone, insurance, address_line1, city, state, zip_code, portal_terms_accepted_at, portal_terms_version, portal_privacy_notice_version')
+          .select('id, name, email, phone, insurance, address_line1, city, state, zip_code, auto_ship_enabled, portal_terms_accepted_at, portal_terms_version, portal_privacy_notice_version')
           .ilike('email', user.email)
           .limit(1)
 
@@ -165,6 +166,17 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
           setClient(matchedClient)
           setClientProducts(productsData || [])
           setClientOrders(ordersData || [])
+
+          if (!clientProductsChannel) {
+            clientProductsChannel = supabase
+              .channel(`portal-client-products-${matchedClient.id}`)
+              .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'client_products', filter: `lead_id=eq.${matchedClient.id}` },
+                fetchClientData
+              )
+              .subscribe()
+          }
         }
       } catch (fetchError) {
         if (!cancelled) {
@@ -181,6 +193,9 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
 
     return () => {
       cancelled = true
+      if (clientProductsChannel) {
+        supabase?.removeChannel(clientProductsChannel)
+      }
     }
   }, [user?.email])
 
@@ -297,6 +312,19 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
       return !isSubsetOfActiveProducts
     })
   }, [activeOrder, clientOrders])
+
+  const latestCompletedOrders = useMemo(() => {
+    const latestOrderByProduct = new Map()
+
+    completedOrders.forEach((order) => {
+      const productKey = order.client_product_id || order.pending_order_items?.[0]?.products?.id || order.id
+      if (!latestOrderByProduct.has(productKey)) {
+        latestOrderByProduct.set(productKey, order)
+      }
+    })
+
+    return [...latestOrderByProduct.values()]
+  }, [completedOrders])
 
   useEffect(() => {
     if (!client) return
@@ -665,7 +693,7 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
               </div>
               <div className="portal-info-card p-5">
                 <p className="text-xs uppercase tracking-[0.15em] font-semibold text-slate-500">Frequency</p>
-                <p className="text-xl font-bold text-slate-900 mt-2">{nextShipment?.frequency_days || 0} days</p>
+                <p className="text-xl font-bold text-slate-900 mt-2">{client?.auto_ship_enabled ? 80 : nextShipment?.frequency_days || 0} days</p>
                 <p className="text-sm text-slate-600 mt-1">Typical refill cycle</p>
               </div>
             </div>
@@ -731,7 +759,7 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
                         </div>
                         <div className="mt-3 text-sm text-slate-600 flex flex-wrap gap-x-4 gap-y-1">
                           <span>Quantity: {item.quantity || 0}</span>
-                          <span>Frequency: {item.frequency_days || 0} days</span>
+                          <span>Frequency: {client?.auto_ship_enabled ? 80 : item.frequency_days || 0} days</span>
                         </div>
                       </div>
                     ))}
@@ -789,11 +817,11 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
                       </div>
                     )}
 
-                    {completedOrders.length > 0 && (
+                    {latestCompletedOrders.length > 0 && (
                       <div>
                         <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-slate-500 mb-3">Past Orders</h3>
                         <div className="space-y-3">
-                          {completedOrders.map((order) => (
+                          {latestCompletedOrders.map((order) => (
                             <div key={order.id} className="portal-row-card p-4">
                               <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
                                 <div>
