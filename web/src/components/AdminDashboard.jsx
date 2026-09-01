@@ -290,6 +290,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const [clientProducts, setClientProducts] = useState([])
   const [allClientProducts, setAllClientProducts] = useState({}) // { clientId: [products] }
   const [pendingOrders, setPendingOrders] = useState([])
+  const [shippedOrders, setShippedOrders] = useState([])
   const [showAddProductModal, setShowAddProductModal] = useState(false)
   const [showEditProductModal, setShowEditProductModal] = useState(false)
   const [editingProduct, setEditingProduct] = useState(null)
@@ -720,6 +721,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     fetchAllClientProducts()
     fetchShippingSchedule()
     fetchPendingOrders()
+    fetchShippedOrders()
     fetchProjects()
     fetchTasks()
     fetchExpenses()
@@ -754,7 +756,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         try {
           await Promise.all([
             fetchPendingOrders(),
-            fetchShippingSchedule()
+            fetchShippingSchedule(),
+            fetchShippedOrders()
           ])
 
           if (selectedClient?.id) {
@@ -1232,7 +1235,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
           )
         `)
         .eq('lead_id', clientId)
-        .in('status', ['ordered', 'shipped', 'cancelled'])
+        .in('status', ['ordered', 'shipped', 'delivered', 'cancelled'])
         .order('ship_date', { ascending: false })
         .limit(50)
       if (error) throw error
@@ -1388,6 +1391,41 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     }
   }
 
+  const fetchShippedOrders = async () => {
+    if (!supabase) return
+
+    try {
+      const { data, error } = await supabase
+        .from('pending_orders')
+        .select(`
+          id,
+          ship_date,
+          status,
+          tracking_number,
+          shipped_at,
+          leads (
+            id,
+            name
+          ),
+          pending_order_items (
+            id,
+            quantity,
+            products (
+              id,
+              name
+            )
+          )
+        `)
+        .eq('status', 'shipped')
+        .order('shipped_at', { ascending: false })
+
+      if (error) throw error
+      setShippedOrders(data || [])
+    } catch (error) {
+      console.error('Error fetching shipped orders:', error)
+    }
+  }
+
   const updatePendingOrderStatus = async (order, nextStatus) => {
     if (!supabase || !order?.id) return
 
@@ -1434,6 +1472,10 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
       updates.shipped_at = nowIso
       updates.tracking_number = trackingNumber
+    }
+
+    if (nextStatus === 'delivered') {
+      updates.delivered_at = nowIso
     }
 
     setUpdating(true)
@@ -1485,7 +1527,11 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       }
 
       await fetchPendingOrders()
+      await fetchShippedOrders()
       await fetchShippingSchedule()
+      if (selectedClient?.id) {
+        await fetchClientOrderHistory(selectedClient.id)
+      }
       alert(`Order updated to ${nextStatus}.`)
     } catch (error) {
       console.error('Error updating pending order status:', error)
@@ -4143,6 +4189,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                               const statusColors = {
                                 ordered: 'bg-blue-50 border-blue-200 text-blue-700',
                                 shipped: 'bg-emerald-50 border-emerald-200 text-emerald-700',
+                                delivered: 'bg-teal-50 border-teal-200 text-teal-700',
                                 cancelled: 'bg-rose-50 border-rose-200 text-rose-600',
                               }
                               const itemNames = (order.pending_order_items || []).map(i => `${i.products?.name || 'Item'} ×${i.quantity}`).join(' • ')
@@ -4161,6 +4208,15 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                                   )}
                                   {order.shipped_at && (
                                     <div className="text-gray-400">Shipped: {formatDate(order.shipped_at)}</div>
+                                  )}
+                                  {order.status === 'shipped' && (
+                                    <button
+                                      onClick={() => updatePendingOrderStatus(order, 'delivered')}
+                                      disabled={updating}
+                                      className="mt-2 text-teal-700 hover:text-teal-800 disabled:text-gray-400 font-medium"
+                                    >
+                                      Mark Delivered
+                                    </button>
                                   )}
                                 </div>
                               )
@@ -6938,6 +6994,36 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                                 </div>
                               )
                             })}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="mt-4 border border-teal-200 rounded-lg overflow-hidden">
+                        <div className="px-4 py-3 bg-teal-50 border-b border-teal-200 flex items-center justify-between">
+                          <h3 className="font-semibold text-teal-900">Shipped Orders Awaiting Delivery Confirmation</h3>
+                          <span className="text-xs text-teal-800">{shippedOrders.length} shipped</span>
+                        </div>
+                        {shippedOrders.length === 0 ? (
+                          <div className="px-4 py-6 text-sm text-gray-500">No shipped orders are awaiting delivery confirmation.</div>
+                        ) : (
+                          <div className="divide-y divide-teal-100">
+                            {shippedOrders.map(order => (
+                              <div key={order.id} className="px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                                <div>
+                                  <div className="font-medium text-gray-900">{order.leads?.name || 'Unknown Client'}</div>
+                                  <div className="text-sm text-gray-600">{(order.pending_order_items || []).map(item => `${item.products?.name || 'Item'} × ${item.quantity}`).join(' • ') || 'No items'}</div>
+                                  <div className="text-xs text-gray-500 mt-1">Shipped: {formatDate(order.shipped_at || order.ship_date)}</div>
+                                  {order.tracking_number && <div className="text-xs text-teal-700 mt-1">Tracking: {order.tracking_number}</div>}
+                                </div>
+                                <button
+                                  onClick={() => updatePendingOrderStatus(order, 'delivered')}
+                                  disabled={updating}
+                                  className="px-3 py-2 bg-teal-600 hover:bg-teal-700 disabled:bg-gray-400 text-white rounded-md text-sm font-medium"
+                                >
+                                  Mark Delivered
+                                </button>
+                              </div>
+                            ))}
                           </div>
                         )}
                       </div>

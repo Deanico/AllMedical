@@ -21,6 +21,7 @@ const ORDER_STATUS_META = {
   ready_to_order: { label: 'Ready to Order', className: 'bg-cyan-100 text-cyan-800' },
   ordered: { label: 'Ordered', className: 'bg-indigo-100 text-indigo-800' },
   shipped: { label: 'Shipped', className: 'bg-emerald-100 text-emerald-800' },
+  delivered: { label: 'Delivered', className: 'bg-teal-100 text-teal-800' },
   cancelled: { label: 'Cancelled', className: 'bg-rose-100 text-rose-800' }
 }
 
@@ -78,6 +79,7 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
   useEffect(() => {
     let cancelled = false
     let clientProductsChannel = null
+    let clientOrdersChannel = null
 
     const fetchClientData = async () => {
       if (!supabase || !user?.email) {
@@ -141,6 +143,7 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
             tracking_number,
             order_placed_at,
             shipped_at,
+            delivered_at,
             notes,
             created_at,
             updated_at,
@@ -177,6 +180,17 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
               )
               .subscribe()
           }
+
+          if (!clientOrdersChannel) {
+            clientOrdersChannel = supabase
+              .channel(`portal-client-orders-${matchedClient.id}`)
+              .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'pending_orders', filter: `lead_id=eq.${matchedClient.id}` },
+                fetchClientData
+              )
+              .subscribe()
+          }
         }
       } catch (fetchError) {
         if (!cancelled) {
@@ -195,6 +209,9 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
       cancelled = true
       if (clientProductsChannel) {
         supabase?.removeChannel(clientProductsChannel)
+      }
+      if (clientOrdersChannel) {
+        supabase?.removeChannel(clientOrdersChannel)
       }
     }
   }, [user?.email])
@@ -800,6 +817,7 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
                             <p>Status: <span className="font-medium text-slate-900">{formatOrderStatus(activeOrder.status)}</span></p>
                             <p>Ordered: {formatDate(activeOrder.order_placed_at)}</p>
                             <p>Shipped: {formatDate(activeOrder.shipped_at)}</p>
+                            <p>Delivered: {formatDate(activeOrder.delivered_at)}</p>
                           </div>
                         </div>
 
@@ -839,6 +857,9 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
                                 <p className="text-sm text-slate-600 mt-3">
                                   {order.pending_order_items.map((item) => `${item.products?.name || 'Item'} x ${item.quantity || 0}`).join(' • ')}
                                 </p>
+                              )}
+                              {order.delivered_at && (
+                                <p className="text-sm text-slate-600 mt-3">Delivered: {formatDate(order.delivered_at)}</p>
                               )}
                             </div>
                           ))}
