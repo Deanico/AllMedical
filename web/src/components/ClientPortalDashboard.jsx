@@ -80,6 +80,8 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
     let cancelled = false
     let clientProductsChannel = null
     let clientOrdersChannel = null
+    const refreshInterval = 30000
+    const canUseRealtime = window.isSecureContext || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
 
     const fetchClientData = async () => {
       if (!supabase || !user?.email) {
@@ -170,7 +172,7 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
           setClientProducts(productsData || [])
           setClientOrders(ordersData || [])
 
-          if (!clientProductsChannel) {
+          if (canUseRealtime && !clientProductsChannel) {
             clientProductsChannel = supabase
               .channel(`portal-client-products-${matchedClient.id}`)
               .on(
@@ -181,7 +183,7 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
               .subscribe()
           }
 
-          if (!clientOrdersChannel) {
+          if (canUseRealtime && !clientOrdersChannel) {
             clientOrdersChannel = supabase
               .channel(`portal-client-orders-${matchedClient.id}`)
               .on(
@@ -204,9 +206,11 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
     }
 
     fetchClientData()
+    const pollingTimer = window.setInterval(fetchClientData, refreshInterval)
 
     return () => {
       cancelled = true
+      window.clearInterval(pollingTimer)
       if (clientProductsChannel) {
         supabase?.removeChannel(clientProductsChannel)
       }
