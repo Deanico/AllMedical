@@ -308,11 +308,12 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     product_id: '',
     quantity: 1,
     next_ship_date: '',
-    frequency_days: 30
+    frequency_days: 30,
+    auto_ship_enabled: true
   })
   const [showEditClientProductModal, setShowEditClientProductModal] = useState(false)
   const [editingClientProduct, setEditingClientProduct] = useState(null)
-  const [editClientProductForm, setEditClientProductForm] = useState({ quantity: 1, next_ship_date: '' })
+  const [editClientProductForm, setEditClientProductForm] = useState({ quantity: 1, next_ship_date: '', auto_ship_enabled: true })
   const [shippingScheduleItems, setShippingScheduleItems] = useState([])
   const [clientOrderHistory, setClientOrderHistory] = useState([])
   const [showOrderHistory, setShowOrderHistory] = useState(false)
@@ -4145,6 +4146,9 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                                 <div className="text-xs text-gray-600">
                                   Quantity: {cp.quantity} • Next Ship: {cp.next_ship_date ? formatDate(cp.next_ship_date) : 'Not set'}
                                 </div>
+                                <span className={`inline-flex mt-2 px-2 py-0.5 rounded-full text-xs font-semibold ${cp.auto_ship_enabled ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-600'}`}>
+                                  {cp.auto_ship_enabled ? 'Autoship enabled' : 'Autoship disabled'}
+                                </span>
                               </div>
                               <div className="flex items-center gap-2 ml-3">
                                 <button
@@ -4152,7 +4156,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                                     setEditingClientProduct(cp)
                                     setEditClientProductForm({
                                       quantity: cp.quantity,
-                                      next_ship_date: cp.next_ship_date || ''
+                                      next_ship_date: cp.next_ship_date || '',
+                                      auto_ship_enabled: cp.auto_ship_enabled !== false
                                     })
                                     setShowEditClientProductModal(true)
                                   }}
@@ -8442,13 +8447,14 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                     product_id: assignProductForm.product_id,
                     quantity: parseInt(assignProductForm.quantity),
                     frequency_days: parseInt(assignProductForm.frequency_days) || 30,
-                    next_ship_date: assignProductForm.next_ship_date || null
+                    next_ship_date: assignProductForm.next_ship_date || null,
+                    auto_ship_enabled: Boolean(assignProductForm.auto_ship_enabled)
                   }])
                 if (error) throw error
                 await fetchClientProducts(assignProductClient.id)
                 await fetchShippingSchedule()
                 setShowAssignProductModal(false)
-                setAssignProductForm({ product_id: '', quantity: 1, next_ship_date: '', frequency_days: 30 })
+                setAssignProductForm({ product_id: '', quantity: 1, next_ship_date: '', frequency_days: 30, auto_ship_enabled: true })
                 alert('Product assigned successfully!')
               } catch (error) {
                 console.error('Error assigning product:', error)
@@ -8492,13 +8498,22 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                 />
                 <p className="text-xs text-gray-500 mt-1">Leave blank to add the product now and set a ship date later. Once a date is set and an order is marked ordered, the next ship date auto-advances.</p>
               </div>
+              <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={assignProductForm.auto_ship_enabled}
+                  onChange={(e) => setAssignProductForm({ ...assignProductForm, auto_ship_enabled: e.target.checked })}
+                  className="h-4 w-4"
+                />
+                Autoship enabled
+              </label>
               <div className="flex gap-3 justify-end">
                 <button
                   type="button"
                   onClick={() => {
                     setShowAssignProductModal(false)
                     setAssignProductClient(null)
-                    setAssignProductForm({ product_id: '', quantity: 1, next_ship_date: '', frequency_days: 30 })
+                    setAssignProductForm({ product_id: '', quantity: 1, next_ship_date: '', frequency_days: 30, auto_ship_enabled: true })
                   }}
                   className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
                 >
@@ -8533,7 +8548,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   .from('client_products')
                   .update({
                     quantity: parseInt(editClientProductForm.quantity),
-                    next_ship_date: updatedShipDate
+                    next_ship_date: updatedShipDate,
+                    auto_ship_enabled: Boolean(editClientProductForm.auto_ship_enabled)
                   })
                   .eq('id', editingClientProduct.id)
                 if (error) throw error
@@ -8629,6 +8645,15 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
+              <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={editClientProductForm.auto_ship_enabled}
+                  onChange={(e) => setEditClientProductForm({ ...editClientProductForm, auto_ship_enabled: e.target.checked })}
+                  className="h-4 w-4"
+                />
+                Autoship enabled
+              </label>
               <div className="flex gap-3 justify-end">
                 <button
                   type="button"

@@ -127,6 +127,9 @@ ORDER BY ship_date ASC
       tracking_number = '...'
   WHERE id = order_id
   ```
+  When `web/add-tracking-number-shipped-status-trigger.sql` has been run in
+  Supabase, adding a tracking number to an `ordered` order automatically changes
+  its status to `shipped` and records `shipped_at`.
 
 ### 3. Results Summary
 
