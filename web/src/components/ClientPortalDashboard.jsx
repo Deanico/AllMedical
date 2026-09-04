@@ -46,11 +46,14 @@ const ACTIVE_STATUS_PRIORITY = {
   pending: 1,
   reviewed: 2,
   ready_to_order: 3,
-  ordered: 4
+  ordered: 4,
+  shipped: 5
 }
 
 export default function ClientPortalDashboard({ user, onLogout, previewMode = false }) {
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshKey, setRefreshKey] = useState(0)
   const [error, setError] = useState('')
   const [client, setClient] = useState(null)
   const [clientProducts, setClientProducts] = useState([])
@@ -78,10 +81,6 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
 
   useEffect(() => {
     let cancelled = false
-    let clientProductsChannel = null
-    let clientOrdersChannel = null
-    const refreshInterval = 30000
-    const canUseRealtime = window.isSecureContext || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
 
     const fetchClientData = async () => {
       if (!supabase || !user?.email) {
@@ -90,7 +89,8 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
         return
       }
 
-      setLoading(true)
+      setLoading((currentLoading) => currentLoading && refreshKey === 0)
+      setRefreshing(true)
       setError('')
 
       try {
@@ -172,27 +172,6 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
           setClientProducts(productsData || [])
           setClientOrders(ordersData || [])
 
-          if (canUseRealtime && !clientProductsChannel) {
-            clientProductsChannel = supabase
-              .channel(`portal-client-products-${matchedClient.id}`)
-              .on(
-                'postgres_changes',
-                { event: '*', schema: 'public', table: 'client_products', filter: `lead_id=eq.${matchedClient.id}` },
-                fetchClientData
-              )
-              .subscribe()
-          }
-
-          if (canUseRealtime && !clientOrdersChannel) {
-            clientOrdersChannel = supabase
-              .channel(`portal-client-orders-${matchedClient.id}`)
-              .on(
-                'postgres_changes',
-                { event: '*', schema: 'public', table: 'pending_orders', filter: `lead_id=eq.${matchedClient.id}` },
-                fetchClientData
-              )
-              .subscribe()
-          }
         }
       } catch (fetchError) {
         if (!cancelled) {
@@ -201,24 +180,29 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
       } finally {
         if (!cancelled) {
           setLoading(false)
+          setRefreshing(false)
         }
       }
     }
 
     fetchClientData()
-    const pollingTimer = window.setInterval(fetchClientData, refreshInterval)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        setRefreshKey((currentKey) => currentKey + 1)
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
 
     return () => {
       cancelled = true
-      window.clearInterval(pollingTimer)
-      if (clientProductsChannel) {
-        supabase?.removeChannel(clientProductsChannel)
-      }
-      if (clientOrdersChannel) {
-        supabase?.removeChannel(clientOrdersChannel)
-      }
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [user?.email])
+  }, [user?.email, refreshKey])
+
+  const refreshPortal = () => {
+    setRefreshKey((currentKey) => currentKey + 1)
+  }
 
   const nextShipment = useMemo(() => {
     if (clientProducts.length === 0) return null
@@ -231,12 +215,10 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
   const activeOrder = useMemo(() => {
     if (clientOrders.length === 0) return null
 
-    const activeStatuses = new Set(['pending', 'reviewed', 'ready_to_order', 'ordered'])
+    const activeStatuses = new Set(['pending', 'reviewed', 'ready_to_order', 'ordered', 'shipped'])
     const activeOrders = clientOrders.filter((order) => activeStatuses.has(order.status))
 
-    if (activeOrders.length === 0) {
-      return clientOrders[0]
-    }
+    if (activeOrders.length === 0) return null
 
     // Treat all rows sharing the most recent ship_date as one cycle, then prefer
     // the most advanced workflow row with the most complete item breakdown.
@@ -274,13 +256,13 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
       return secondUpdatedAt.localeCompare(firstUpdatedAt)
     })
 
-    return sortedCurrentCycle[0] || activeOrders[0] || clientOrders[0]
+    return sortedCurrentCycle[0] || activeOrders[0]
   }, [clientOrders])
 
   const completedOrders = useMemo(() => {
     if (clientOrders.length === 0) return []
 
-    const activeStatuses = new Set(['pending', 'reviewed', 'ready_to_order', 'ordered'])
+    const activeStatuses = new Set(['pending', 'reviewed', 'ready_to_order', 'ordered', 'shipped'])
     const baseOrders = clientOrders.filter((order) => {
       if (order.id === activeOrder?.id) return false
 
@@ -289,7 +271,7 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
         return (order.ship_date || '') !== (activeOrder?.ship_date || '')
       }
 
-      return true
+      return order.status === 'delivered' || order.status === 'cancelled'
     })
 
     if (!activeOrder) {
@@ -550,6 +532,9 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
           </div>
           {!previewMode && (
             <div className="flex items-center gap-2">
+              <button onClick={refreshPortal} disabled={refreshing} className="portal-secondary-btn">
+                {refreshing ? 'Refreshing...' : 'Refresh'}
+              </button>
               <button
                 onClick={() => {
                   setAccountMessage(null)

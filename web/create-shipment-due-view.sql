@@ -1,5 +1,5 @@
 -- Create a view for shipments due in the next 7 days
--- Used by automation tools (e.g., n8n) to find active auto-ship records
+-- Used by automation tools (e.g., n8n) to find due products for active clients.
 
 DROP VIEW IF EXISTS shipment_due_view;
 
@@ -18,11 +18,14 @@ SELECT
   cp.next_ship_date,
   cp.next_ship_date AS ship_date,
   cp.active,
-  cp.auto_ship_enabled
+  cp.auto_ship_enabled,
+  l.stage AS client_stage,
+  l.is_paused AS client_is_paused
 FROM client_products cp
 JOIN leads l ON l.id = cp.lead_id
 JOIN products p ON p.id = cp.product_id
 WHERE cp.active = true
-  AND cp.auto_ship_enabled = true
+  AND l.stage = 'qualified'
+  AND COALESCE(l.is_paused, false) = false
   AND cp.next_ship_date <= CURRENT_DATE + INTERVAL '7 days'
 ORDER BY cp.next_ship_date ASC, patient_full_name ASC;
