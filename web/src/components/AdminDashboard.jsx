@@ -254,6 +254,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const [stateFilter, setStateFilter] = useState('')
   const [profitMarginSort, setProfitMarginSort] = useState('')
   const [clientStatusFilter, setClientStatusFilter] = useState('active')
+  const [shipmentAutomationFilter, setShipmentAutomationFilter] = useState('all')
   const [showAddLeadModal, setShowAddLeadModal] = useState(false)
   const [addLeadForm, setAddLeadForm] = useState({ 
     name: '', 
@@ -309,11 +310,11 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     quantity: 1,
     next_ship_date: '',
     frequency_days: 30,
-    auto_ship_enabled: true
+    auto_ship_enabled: false
   })
   const [showEditClientProductModal, setShowEditClientProductModal] = useState(false)
   const [editingClientProduct, setEditingClientProduct] = useState(null)
-  const [editClientProductForm, setEditClientProductForm] = useState({ quantity: 1, next_ship_date: '', auto_ship_enabled: true })
+  const [editClientProductForm, setEditClientProductForm] = useState({ quantity: 1, next_ship_date: '', auto_ship_enabled: false })
   const [shippingScheduleItems, setShippingScheduleItems] = useState([])
   const [clientOrderHistory, setClientOrderHistory] = useState([])
   const [showOrderHistory, setShowOrderHistory] = useState(false)
@@ -1280,6 +1281,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         .from('client_products')
         .select(`
           lead_id,
+          auto_ship_enabled,
           products (
             id,
             name,
@@ -2258,8 +2260,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         prior_auth_status: editForm.prior_auth_status || null,
         prior_auth_start_date: editForm.prior_auth_start_date || null,
         prior_auth_end_date: editForm.prior_auth_end_date || null,
-        is_paused: Boolean(editForm.is_paused),
-        auto_ship_enabled: Boolean(editForm.auto_ship_enabled)
+        is_paused: Boolean(editForm.is_paused)
       }
 
       if (editForm.payment_status) {
@@ -3543,7 +3544,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                     onChange={(e) => setClientSearchQuery(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                   />
-                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-7 gap-2">
                     <select
                       value={clientSearchField}
                       onChange={(e) => setClientSearchField(e.target.value)}
@@ -3566,6 +3567,15 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                       <option value="active">Active Clients</option>
                       <option value="all">All Clients</option>
                       <option value="paused">Paused Clients</option>
+                    </select>
+                    <select
+                      value={shipmentAutomationFilter}
+                      onChange={(e) => setShipmentAutomationFilter(e.target.value)}
+                      className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    >
+                      <option value="all">All S.A Status</option>
+                      <option value="enabled">S.A Enabled</option>
+                      <option value="disabled">S.A Not Enabled</option>
                     </select>
                     <select
                       value={insuranceFilter}
@@ -3634,6 +3644,12 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                     filtered = filtered.filter(client => !client.is_paused)
                   } else if (clientStatusFilter === 'paused') {
                     filtered = filtered.filter(client => client.is_paused)
+                  }
+
+                  if (shipmentAutomationFilter === 'enabled') {
+                    filtered = filtered.filter(client => client.auto_ship_enabled)
+                  } else if (shipmentAutomationFilter === 'disabled') {
+                    filtered = filtered.filter(client => !client.auto_ship_enabled)
                   }
                   
                   // Search filter
@@ -3742,6 +3758,11 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                         {client.is_paused && (
                           <span className="ml-2 inline-block px-2 py-0.5 text-xs rounded-full bg-yellow-100 text-yellow-800 font-medium">
                             Paused
+                          </span>
+                        )}
+                        {client.auto_ship_enabled && (
+                          <span className="ml-2 inline-block px-2 py-0.5 text-xs rounded-full bg-emerald-100 text-emerald-800 font-medium">
+                            S.A
                           </span>
                         )}
                         {(!client.address_line1 || !client.birthday) && (
@@ -4110,10 +4131,10 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                     <>
                     <div>
                       <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
-                        Auto-Ship 80-Day Cycle
+                        Shipments Automated
                       </label>
                       <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${selectedClient.auto_ship_enabled ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-600'}`}>
-                        {selectedClient.auto_ship_enabled ? 'Enabled' : 'Disabled'}
+                        {selectedClient.auto_ship_enabled ? 'S.A' : 'Not automated'}
                       </span>
                     </div>
 
@@ -4147,7 +4168,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                                   Quantity: {cp.quantity} • Next Ship: {cp.next_ship_date ? formatDate(cp.next_ship_date) : 'Not set'}
                                 </div>
                                 <span className={`inline-flex mt-2 px-2 py-0.5 rounded-full text-xs font-semibold ${cp.auto_ship_enabled ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-600'}`}>
-                                  {cp.auto_ship_enabled ? 'Autoship enabled' : 'Autoship disabled'}
+                                  {cp.auto_ship_enabled ? 'Supplier autoship enabled' : 'Awaiting tracking'}
                                 </span>
                               </div>
                               <div className="flex items-center gap-2 ml-3">
@@ -4175,6 +4196,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                                           .eq('id', cp.id)
                                         if (error) throw error
                                         await fetchClientProducts(selectedClient.id)
+                                        await fetchLeads()
+                                        await fetchAllClientProducts()
                                       } catch (error) {
                                         console.error('Error removing product:', error)
                                         alert('Failed to remove product')
@@ -8448,13 +8471,15 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                     quantity: parseInt(assignProductForm.quantity),
                     frequency_days: parseInt(assignProductForm.frequency_days) || 30,
                     next_ship_date: assignProductForm.next_ship_date || null,
-                    auto_ship_enabled: Boolean(assignProductForm.auto_ship_enabled)
+                    auto_ship_enabled: false
                   }])
                 if (error) throw error
                 await fetchClientProducts(assignProductClient.id)
+                await fetchLeads()
+                await fetchAllClientProducts()
                 await fetchShippingSchedule()
                 setShowAssignProductModal(false)
-                setAssignProductForm({ product_id: '', quantity: 1, next_ship_date: '', frequency_days: 30, auto_ship_enabled: true })
+                setAssignProductForm({ product_id: '', quantity: 1, next_ship_date: '', frequency_days: 30, auto_ship_enabled: false })
                 alert('Product assigned successfully!')
               } catch (error) {
                 console.error('Error assigning product:', error)
@@ -8498,22 +8523,14 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                 />
                 <p className="text-xs text-gray-500 mt-1">Leave blank to add the product now and set a ship date later. Once a date is set and an order is marked ordered, the next ship date auto-advances.</p>
               </div>
-              <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={assignProductForm.auto_ship_enabled}
-                  onChange={(e) => setAssignProductForm({ ...assignProductForm, auto_ship_enabled: e.target.checked })}
-                  className="h-4 w-4"
-                />
-                Autoship enabled
-              </label>
+              <p className="text-xs text-gray-500">Supplier autoship is enabled automatically when this product receives a tracking number.</p>
               <div className="flex gap-3 justify-end">
                 <button
                   type="button"
                   onClick={() => {
                     setShowAssignProductModal(false)
                     setAssignProductClient(null)
-                    setAssignProductForm({ product_id: '', quantity: 1, next_ship_date: '', frequency_days: 30, auto_ship_enabled: true })
+                    setAssignProductForm({ product_id: '', quantity: 1, next_ship_date: '', frequency_days: 30, auto_ship_enabled: false })
                   }}
                   className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
                 >
@@ -8548,8 +8565,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   .from('client_products')
                   .update({
                     quantity: parseInt(editClientProductForm.quantity),
-                    next_ship_date: updatedShipDate,
-                    auto_ship_enabled: Boolean(editClientProductForm.auto_ship_enabled)
+                    next_ship_date: updatedShipDate
                   })
                   .eq('id', editingClientProduct.id)
                 if (error) throw error
@@ -8615,6 +8631,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                 }
 
                 await fetchClientProducts(editingClientProduct.lead_id)
+                await fetchLeads()
+                await fetchAllClientProducts()
                 await fetchShippingSchedule()
                 await fetchPendingOrders()
                 setShowEditClientProductModal(false)
@@ -8645,15 +8663,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
-              <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={editClientProductForm.auto_ship_enabled}
-                  onChange={(e) => setEditClientProductForm({ ...editClientProductForm, auto_ship_enabled: e.target.checked })}
-                  className="h-4 w-4"
-                />
-                Autoship enabled
-              </label>
+              <p className="text-xs text-gray-500">Supplier autoship is confirmed automatically after this product receives a tracking number.</p>
               <div className="flex gap-3 justify-end">
                 <button
                   type="button"

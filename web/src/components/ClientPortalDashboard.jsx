@@ -699,7 +699,7 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
               </div>
               <div className="portal-info-card p-5">
                 <p className="text-xs uppercase tracking-[0.15em] font-semibold text-slate-500">Frequency</p>
-                <p className="text-xl font-bold text-slate-900 mt-2">{client?.auto_ship_enabled ? 80 : nextShipment?.frequency_days || 0} days</p>
+                <p className="text-xl font-bold text-slate-900 mt-2">{nextShipment?.frequency_days || 0} days</p>
                 <p className="text-sm text-slate-600 mt-1">Typical refill cycle</p>
               </div>
             </div>
@@ -765,7 +765,7 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
                         </div>
                         <div className="mt-3 text-sm text-slate-600 flex flex-wrap gap-x-4 gap-y-1">
                           <span>Quantity: {item.quantity || 0}</span>
-                          <span>Frequency: {client?.auto_ship_enabled ? 80 : item.frequency_days || 0} days</span>
+                          <span>Frequency: {item.frequency_days || 0} days</span>
                         </div>
                       </div>
                     ))}
