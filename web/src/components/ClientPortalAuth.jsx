@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { getPortalRedirectUrl } from '../lib/portalUrls'
 
 const DEMO_PORTAL_EMAIL = 'demo.client@allmedical.com'
 const DEMO_PORTAL_PASSWORD = 'DemoPortal123!'
@@ -66,7 +67,7 @@ export default function ClientPortalAuth({ onLogin }) {
 
     setLoading(true)
     const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/portal`
+      redirectTo: getPortalRedirectUrl()
     })
 
     if (resetError) {

@@ -6,6 +6,7 @@ import { generatePhysicianOrder, downloadPDF, getPhysicianOrderSupplierLabel } f
 import { generateTreatmentRecords, getTreatmentRecordSupplierLabel } from '../lib/generateTreatmentRecords'
 import { generateHardshipForm } from '../lib/generateHardshipForm'
 import { calculateInsuranceProjection } from '../lib/insuranceProjection'
+import { getPortalRedirectUrl } from '../lib/portalUrls'
 
 const parseDateInput = (value) => {
   if (!value) return null
@@ -2342,7 +2343,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       setPortalInviteMessage(null)
 
       const inviteTimestamp = new Date().toISOString()
-      const redirectTo = `${window.location.origin}/portal`
+      const redirectTo = getPortalRedirectUrl()
       const { error } = await supabase.auth.signInWithOtp({
         email: selectedClient.email,
         options: {
