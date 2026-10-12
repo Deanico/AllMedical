@@ -1,5 +1,5 @@
 const { google } = require('googleapis');
-const { createClient } = require('@supabase/supabase-js');
+const patientMessaging = require('../shared/patient-messaging.cjs');
 
 module.exports = async function (context, req) {
   context.log('Google Sheets Sync function triggered');
@@ -13,20 +13,20 @@ module.exports = async function (context, req) {
   }
 
   try {
-    // Get environment variables
-    const supabaseUrl = process.env.VITE_SUPABASE_URL;
-    const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY;
-    const sheetId = process.env.GOOGLE_SHEET_ID;
-    const serviceAccountEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-    const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n');
-
-    if (!supabaseUrl || !supabaseKey) {
+    const authorization = await patientMessaging.authorizeAdmin(req);
+    if (authorization.error) {
       context.res = {
-        status: 500,
-        body: { error: 'Supabase credentials not configured' }
+        status: authorization.error.status,
+        body: { error: authorization.error.message }
       };
       return;
     }
+    const supabase = authorization.supabase;
+
+    // Get environment variables
+    const sheetId = process.env.GOOGLE_SHEET_ID;
+    const serviceAccountEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+    const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n');
 
     if (!sheetId || !serviceAccountEmail || !privateKey) {
       context.res = {
@@ -35,9 +35,6 @@ module.exports = async function (context, req) {
       };
       return;
     }
-
-    // Initialize Supabase client
-    const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Initialize Google Sheets API
     const auth = new google.auth.JWT(

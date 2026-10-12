@@ -1191,10 +1191,12 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     setFinancialSyncing(true)
 
     try {
+      const { data: sessionData } = await supabase.auth.getSession()
       const response = await fetch('/api/sync-financial-sheets', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionData?.session?.access_token || ''}`
         }
       })
 
@@ -2927,10 +2929,12 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     setSyncResult(null)
 
     try {
+      const { data: sessionData } = await supabase.auth.getSession()
       const response = await fetch('/api/sync-google-sheets', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionData?.session?.access_token || ''}`
         },
       })
 

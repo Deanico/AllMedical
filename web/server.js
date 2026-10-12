@@ -3,7 +3,6 @@ import cors from 'cors'
 import twilio from 'twilio'
 import dotenv from 'dotenv'
 import { google } from 'googleapis'
-import { createClient } from '@supabase/supabase-js'
 import https from 'https'
 import crypto from 'crypto'
 import patientMessaging from './api/shared/patient-messaging.cjs'
@@ -13,6 +12,8 @@ dotenv.config()
 
 const app = express()
 const PORT = 3001
+// Lets the built-in scheduler call the protected financial sync route without a user session.
+const internalSyncToken = crypto.randomUUID()
 
 app.use(cors())
 app.use(express.urlencoded({ extended: false }))
@@ -168,23 +169,20 @@ app.post('/api/sync-google-sheets', async (req, res) => {
   try {
     console.log('Google Sheets Sync triggered')
 
+    const authorization = await patientMessaging.authorizeAdmin(req)
+    if (authorization.error) {
+      return res.status(authorization.error.status).json({ error: authorization.error.message })
+    }
+    const supabase = authorization.supabase
+
     // Get environment variables
-    const supabaseUrl = process.env.VITE_SUPABASE_URL
-    const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY
     const sheetId = process.env.GOOGLE_SHEET_ID
     const serviceAccountEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL
     const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n')
 
-    if (!supabaseUrl || !supabaseKey) {
-      return res.status(500).json({ error: 'Supabase credentials not configured' })
-    }
-
     if (!sheetId || !serviceAccountEmail || !privateKey) {
       return res.status(500).json({ error: 'Google Sheets credentials not configured' })
     }
-
-    // Initialize Supabase client
-    const supabase = createClient(supabaseUrl, supabaseKey)
 
     // Initialize Google Sheets API
     const auth = new google.auth.JWT(
@@ -320,11 +318,12 @@ app.post('/api/sync-financial-sheets', async (req, res) => {
   try {
     console.log('Financial sheets sync triggered')
 
-    const supabaseUrl = process.env.VITE_SUPABASE_URL
-    const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY
-
-    if (!supabaseUrl || !supabaseKey) {
-      return res.status(500).json({ error: 'Supabase credentials not configured' })
+    const isScheduledCall = req.get('x-internal-sync-token') === internalSyncToken
+    if (!isScheduledCall) {
+      const authorization = await patientMessaging.authorizeAdmin(req)
+      if (authorization.error) {
+        return res.status(authorization.error.status).json({ error: authorization.error.message })
+      }
     }
 
     const claimsSheetId = process.env.GOOGLE_CLAIMS_SHEET_ID
@@ -338,7 +337,7 @@ app.post('/api/sync-financial-sheets', async (req, res) => {
       })
     }
 
-    supabase = createClient(supabaseUrl, supabaseKey)
+    supabase = patientMessaging.getServiceClient()
     const sheets = getGoogleSheetsClient()
 
     const [claimsResponse, opsResponse] = await Promise.all([
@@ -662,7 +661,7 @@ app.listen(PORT, () => {
     try {
       const response = await fetch(`http://localhost:${PORT}/api/sync-financial-sheets`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', 'x-internal-sync-token': internalSyncToken }
       })
 
       const payload = await response.json().catch(() => null)

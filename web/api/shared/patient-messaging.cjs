@@ -36,7 +36,7 @@ const authorizeAdmin = async (req) => {
   const authorization = getRequestHeader(req, 'authorization') || ''
   const token = authorization.match(/^Bearer\s+(.+)$/i)?.[1]
   if (!token) {
-    return { error: { status: 401, message: 'Sign in as an administrator to access messages.' } }
+    return { error: { status: 401, message: 'Sign in as an administrator to continue.' } }
   }
 
   const supabase = getServiceClient()
@@ -223,6 +223,8 @@ const handleTwilioWebhook = async (req) => {
 }
 
 module.exports = {
+  authorizeAdmin,
+  getServiceClient,
   getPatientMessages,
   handleTwilioWebhook,
   sendPatientMessage
