@@ -1,14 +1,9 @@
 import { useState } from 'react'
-
-const AUTHORIZED_USERS = [
-  { email: 'dean@nideai.net', password: 'Allmedical20!' },
-  { email: 'deansolarmachine@gmail.com', password: 'Allmedical20!' }
-]
+import { supabase } from '../lib/supabaseClient'
 
 export default function AdminLogin({ onLogin }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [rememberMe, setRememberMe] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -17,25 +12,32 @@ export default function AdminLogin({ onLogin }) {
     setLoading(true)
     setError('')
 
-    // Simple authentication check
-    const user = AUTHORIZED_USERS.find(
-      u => u.email === email && u.password === password
-    )
-
-    if (user) {
-      // Store in localStorage (persistent) or sessionStorage (session only)
-      const authData = JSON.stringify({ email })
-      if (rememberMe) {
-        localStorage.setItem('adminAuth', authData)
-      } else {
-        sessionStorage.setItem('adminAuth', authData)
-      }
-      onLogin(email)
-    } else {
-      setError('Invalid credentials')
+    if (!supabase) {
+      setError('Admin sign-in is unavailable. Please contact support.')
+      setLoading(false)
+      return
     }
-    
-    setLoading(false)
+
+    try {
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password
+      })
+
+      if (signInError) throw signInError
+
+      if (data.user?.app_metadata?.role !== 'admin') {
+        await supabase.auth.signOut()
+        setError('This account does not have administrator access.')
+        return
+      }
+
+      onLogin(data.user)
+    } catch (signInError) {
+      setError(signInError.message || 'Unable to sign in. Please try again.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -80,19 +82,6 @@ export default function AdminLogin({ onLogin }) {
               className="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="••••••••"
             />
-          </div>
-
-          <div className="flex items-center">
-            <input
-              id="rememberMe"
-              type="checkbox"
-              checked={rememberMe}
-              onChange={(e) => setRememberMe(e.target.checked)}
-              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-            />
-            <label htmlFor="rememberMe" className="ml-2 block text-sm text-gray-700">
-              Remember me
-            </label>
           </div>
 
           <button

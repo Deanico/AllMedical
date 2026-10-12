@@ -18,23 +18,18 @@ export default function Router() {
     let mounted = true
 
     const initializeRouter = async () => {
-      // Check both localStorage (remember me) and sessionStorage
-      const authData = localStorage.getItem('adminAuth') || sessionStorage.getItem('adminAuth')
-      if (authData) {
-        try {
-          const { email } = JSON.parse(authData)
-          if (mounted) setAdminEmail(email)
-        } catch (e) {
-          localStorage.removeItem('adminAuth')
-          sessionStorage.removeItem('adminAuth')
-        }
-      }
+      localStorage.removeItem('adminAuth')
+      sessionStorage.removeItem('adminAuth')
 
       const path = window.location.pathname
 
       if (path === '/admin') {
+        const { data } = await supabase?.auth.getSession() || { data: null }
+        const user = data?.session?.user || null
+        const adminUser = user?.app_metadata?.role === 'admin' ? user : null
         if (mounted) {
-          setView(authData ? 'adminDashboard' : 'adminLogin')
+          setAdminEmail(adminUser?.email || null)
+          setView(adminUser ? 'adminDashboard' : 'adminLogin')
           setReady(true)
         }
         return
@@ -80,7 +75,12 @@ export default function Router() {
     initializeRouter()
 
     const authListener = supabase?.auth.onAuthStateChange((_event, session) => {
-      if (window.location.pathname === '/portal') {
+      if (window.location.pathname === '/admin') {
+        const user = session?.user
+        const adminUser = user?.app_metadata?.role === 'admin' ? user : null
+        setAdminEmail(adminUser?.email || null)
+        setView(adminUser ? 'adminDashboard' : 'adminLogin')
+      } else if (window.location.pathname === '/portal') {
         const user = session?.user || null
         setClientUser(user)
         setView(user ? 'clientActivation' : 'clientLogin')
@@ -117,15 +117,14 @@ export default function Router() {
     return () => window.removeEventListener('popstate', handlePopState)
   }, [adminEmail, clientUser])
 
-  const handleLogin = (email) => {
-    setAdminEmail(email)
+  const handleLogin = (user) => {
+    setAdminEmail(user.email)
     setView('adminDashboard')
     window.history.pushState({}, '', '/admin')
   }
 
-  const handleLogout = () => {
-    localStorage.removeItem('adminAuth')
-    sessionStorage.removeItem('adminAuth')
+  const handleLogout = async () => {
+    await supabase?.auth.signOut()
     setAdminEmail(null)
     setView('public')
     window.history.pushState({}, '', '/')

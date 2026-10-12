@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import ClientPortalDashboard from './ClientPortalDashboard'
 import ClientClaimsPanel from './ClientClaimsPanel'
+import SecureFileLink from './SecureFileLink'
+import PatientMessagesPanel from './PatientMessagesPanel'
 import { generatePhysicianOrder, downloadPDF, getPhysicianOrderSupplierLabel } from '../lib/generatePhysicianOrder'
 import { generateTreatmentRecords, getTreatmentRecordSupplierLabel } from '../lib/generateTreatmentRecords'
 import { generateHardshipForm } from '../lib/generateHardshipForm'
@@ -63,7 +65,8 @@ const CLIENT_DETAIL_TABS = [
   { key: 'products', label: 'Products & Shipping' },
   { key: 'financial', label: 'Financial' },
   { key: 'claims', label: 'Claims & EOBs' },
-  { key: 'documents', label: 'Documents' }
+  { key: 'documents', label: 'Documents' },
+  { key: 'messages', label: 'Messages' }
 ]
 
 const PRIOR_AUTH_STATUS_META = {
@@ -4028,14 +4031,14 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                           </label>
                           <div className="flex gap-3 text-sm">
                             {selectedClient.insurance_card_front_url && (
-                              <a href={selectedClient.insurance_card_front_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">
+                              <SecureFileLink bucket="insurance-cards" value={selectedClient.insurance_card_front_url} className="text-blue-600 hover:underline">
                                 View front
-                              </a>
+                              </SecureFileLink>
                             )}
                             {selectedClient.insurance_card_back_url && (
-                              <a href={selectedClient.insurance_card_back_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">
+                              <SecureFileLink bucket="insurance-cards" value={selectedClient.insurance_card_back_url} className="text-blue-600 hover:underline">
                                 View back
-                              </a>
+                              </SecureFileLink>
                             )}
                           </div>
                         </div>
@@ -4126,6 +4129,10 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                         rows="3"
                       />
                     </div>
+                    )}
+
+                    {activeClientTab === 'messages' && (
+                      <PatientMessagesPanel patient={selectedClient} />
                     )}
 
                     {activeClientTab === 'products' && (
@@ -4611,17 +4618,16 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                                     {formatDate(selectedClient.physician_order_received_at)}
                                     {selectedClient.physician_order_file_url && (
                                       <div className="mt-1">
-                                        <a 
-                                          href={selectedClient.physician_order_file_url} 
-                                          target="_blank" 
-                                          rel="noopener noreferrer"
+                                        <SecureFileLink
+                                          bucket="physician-orders"
+                                          value={selectedClient.physician_order_file_url}
                                           className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium"
                                         >
                                           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                                             <path fillRule="evenodd" d="M8 4a3 3 0 00-3 3v4a5 5 0 0010 0V7a1 1 0 112 0v4a7 7 0 11-14 0V7a5 5 0 0110 0v4a3 3 0 11-6 0V7a1 1 0 012 0v4a1 1 0 102 0V7a3 3 0 00-3-3z" clipRule="evenodd" />
                                           </svg>
                                           View Signed Order
-                                        </a>
+                                        </SecureFileLink>
                                       </div>
                                     )}
                                   </div>
@@ -4827,17 +4833,16 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                                     {formatDate(selectedClient.treatment_record_received_at)}
                                     {selectedClient.treatment_record_file_url && (
                                       <div className="mt-1">
-                                        <a
-                                          href={selectedClient.treatment_record_file_url}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
+                                        <SecureFileLink
+                                          bucket="treatment-records"
+                                          value={selectedClient.treatment_record_file_url}
                                           className="inline-flex items-center gap-1 text-emerald-700 hover:text-emerald-900 font-medium"
                                         >
                                           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                                             <path fillRule="evenodd" d="M8 4a3 3 0 00-3 3v4a5 5 0 0010 0V7a1 1 0 112 0v4a7 7 0 11-14 0V7a5 5 0 0110 0v4a3 3 0 11-6 0V7a1 1 0 012 0v4a1 1 0 102 0V7a3 3 0 00-3-3z" clipRule="evenodd" />
                                           </svg>
                                           View Signed Treatment Record
-                                        </a>
+                                        </SecureFileLink>
                                       </div>
                                     )}
                                   </div>
@@ -4999,17 +5004,16 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                                 <div className="text-sm text-gray-600">
                                   {formatDate(selectedClient.hardship_form_received_at)}
                                   {selectedClient.hardship_form_file_url && (
-                                    <a
-                                      href={selectedClient.hardship_form_file_url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
+                                    <SecureFileLink
+                                      bucket="treatment-records"
+                                      value={selectedClient.hardship_form_file_url}
                                       className="ml-2 text-emerald-700 hover:text-emerald-900 underline flex items-center gap-1 inline-flex"
                                     >
                                       <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                                         <path fillRule="evenodd" d="M8 4a3 3 0 00-3 3v4a5 5 0 0010 0V7a1 1 0 112 0v4a7 7 0 11-14 0V7a5 5 0 0110 0v4a3 3 0 11-6 0V7a1 1 0 012 0v4a1 1 0 102 0V7a3 3 0 00-3-3z" clipRule="evenodd" />
                                       </svg>
                                       View File
-                                    </a>
+                                    </SecureFileLink>
                                   )}
                                 </div>
                               ) : selectedClient.hardship_form_sent_at ? (
@@ -7774,9 +7778,9 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                       />
                       {editForm.insurance_card_front_url && (
                         <div className="flex items-center gap-2 mt-1">
-                          <a href={editForm.insurance_card_front_url} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline">
+                          <SecureFileLink bucket="insurance-cards" value={editForm.insurance_card_front_url} className="text-xs text-blue-600 hover:underline">
                             View saved front
-                          </a>
+                          </SecureFileLink>
                           <button
                             type="button"
                             aria-label="Remove saved insurance card front"
@@ -7801,9 +7805,9 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                       />
                       {editForm.insurance_card_back_url && (
                         <div className="flex items-center gap-2 mt-1">
-                          <a href={editForm.insurance_card_back_url} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline">
+                          <SecureFileLink bucket="insurance-cards" value={editForm.insurance_card_back_url} className="text-xs text-blue-600 hover:underline">
                             View saved back
-                          </a>
+                          </SecureFileLink>
                           <button
                             type="button"
                             aria-label="Remove saved insurance card back"
@@ -9288,4 +9292,3 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     </div>
   )
 }
-

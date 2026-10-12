@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import SecureFileLink from './SecureFileLink'
 
 const STATUS_META = {
   submitted: { label: 'Submitted', className: 'bg-blue-100 text-blue-800' },
@@ -359,9 +360,9 @@ export default function ClientClaimsPanel({ client }) {
                 </div>
                 <div className="flex items-center gap-2">
                   {claim.file_url && (
-                    <a href={claim.file_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline text-xs font-medium">
+                    <SecureFileLink bucket="client-claims" value={claim.file_url} className="text-blue-600 hover:underline text-xs font-medium">
                       View File
-                    </a>
+                    </SecureFileLink>
                   )}
                   <button onClick={() => openEditForm(claim)} className="text-blue-600 hover:text-blue-700 text-xs font-medium">
                     Edit

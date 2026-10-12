@@ -6,6 +6,8 @@ import { google } from 'googleapis'
 import { createClient } from '@supabase/supabase-js'
 import https from 'https'
 import crypto from 'crypto'
+import patientMessaging from './api/shared/patient-messaging.cjs'
+import smsGuard from './api/shared/sms-guard.cjs'
 
 dotenv.config()
 
@@ -13,6 +15,7 @@ const app = express()
 const PORT = 3001
 
 app.use(cors())
+app.use(express.urlencoded({ extended: false }))
 app.use(express.json())
 
 const cleanCell = (value) => String(value ?? '').trim()
@@ -83,14 +86,53 @@ const getGoogleSheetsClient = () => {
   return google.sheets({ version: 'v4', auth })
 }
 
+app.get('/api/patient-messages/:patientId', async (req, res) => {
+  try {
+    const result = await patientMessaging.getPatientMessages(req, req.params.patientId)
+    return res.status(result.status).json(result.body)
+  } catch (error) {
+    console.error('Patient message lookup failed:', error)
+    return res.status(500).json({ error: 'Unable to load patient messages.' })
+  }
+})
+
+app.post('/api/patient-messages/:patientId', async (req, res) => {
+  try {
+    const result = await patientMessaging.sendPatientMessage(req, req.params.patientId)
+    return res.status(result.status).json(result.body)
+  } catch (error) {
+    console.error('Patient message send failed:', error)
+    return res.status(500).json({ error: 'Unable to send patient message.' })
+  }
+})
+
+app.post('/api/twilio-webhook', async (req, res) => {
+  try {
+    const result = await patientMessaging.handleTwilioWebhook(req)
+    return res.status(result.status).type(result.contentType || 'text/plain').send(result.body)
+  } catch (error) {
+    console.error('Twilio webhook failed:', error)
+    return res.status(500).type('text/plain').send('Unable to process Twilio webhook.')
+  }
+})
+
 app.post('/api/send-sms', async (req, res) => {
   try {
-    const { name, email, phone, insurance, notes } = req.body
+    if (smsGuard.isRateLimited(req.ip || 'unknown')) {
+      return res.status(429).json({ error: 'Too many requests' })
+    }
+
+    const submission = smsGuard.validateContactPayload(req.body)
+    if (!submission) {
+      return res.status(400).json({ error: 'Invalid submission' })
+    }
+
+    const { name, email, phone, insurance, notes } = submission
 
     // Twilio credentials from environment variables
-    const accountSid = process.env.VITE_TWILIO_ACCOUNT_SID
-    const authToken = process.env.VITE_TWILIO_AUTH_TOKEN
-    const twilioPhone = process.env.VITE_TWILIO_PHONE_NUMBER
+    const accountSid = process.env.TWILIO_ACCOUNT_SID || process.env.VITE_TWILIO_ACCOUNT_SID
+    const authToken = process.env.TWILIO_AUTH_TOKEN || process.env.VITE_TWILIO_AUTH_TOKEN
+    const twilioPhone = process.env.TWILIO_PHONE_NUMBER || process.env.VITE_TWILIO_PHONE_NUMBER
     const yourPhone = process.env.VITE_YOUR_PHONE_NUMBER
 
     if (!accountSid || !authToken || !twilioPhone || !yourPhone) {

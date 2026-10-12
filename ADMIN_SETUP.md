@@ -41,10 +41,8 @@ This guide walks you through setting up the admin dashboard for tracking leads a
 ### Access the Admin Dashboard
 
 1. Go to `http://localhost:5173/admin` (or your deployed URL + `/admin`)
-2. Log in with one of the authorized emails:
-   - `dean@nideai.net`
-   - `deansolarmachine@gmail.com`
-3. Password: `Allmedical20!`
+2. Sign in with your Supabase Auth admin account (its app metadata must contain `{"role": "admin"}`).
+3. After running the table scripts, run `web/secure-database-and-storage.sql` in the Supabase SQL Editor. It restricts all data and patient documents to admins. Re-run it after applying any other schema script.
 
 ## 3. Using the Admin Dashboard
 
@@ -116,12 +114,9 @@ Track shipping dates so you know when to send the next shipment. For example:
 
 ## 5. Security Notes
 
-- Admin credentials are hardcoded for simplicity
-- In production, consider:
-  - Moving to Supabase Auth for better security
-  - Adding password hashing
-  - Implementing session timeout
-  - Adding audit logs
+- Admin sign-in uses Supabase Auth; never store passwords in the repo or docs
+- Keep "Confirm email" enabled in Supabase Auth so portal users can only access records matching a verified email
+- Consider session timeouts and audit logs
 
 ## 6. Accessing Admin from Public Site
 
@@ -139,8 +134,8 @@ Alternatively, just navigate directly to `/admin` in your browser.
 - Check browser console for errors
 
 ### Can't log in
-- Verify you're using one of the authorized emails
-- Password is case-sensitive: `Allmedical20!`
+- Verify you're using a Supabase Auth user whose app metadata has `{"role": "admin"}`
+- Reset the password from Supabase → Authentication → Users
 
 ### Data not updating
 - Refresh the page to see latest data

@@ -1,4 +1,5 @@
 const twilio = require('twilio');
+const smsGuard = require('../shared/sms-guard.cjs');
 
 module.exports = async function (context, req) {
   context.log('SMS API function triggered');
@@ -13,12 +14,27 @@ module.exports = async function (context, req) {
   }
 
   try {
-    const { name, email, phone, insurance, notes } = req.body;
+    const clientIp = String(
+      req.headers['x-forwarded-for'] || req.headers['x-azure-clientip'] || 'unknown'
+    ).split(',')[0].trim()
+
+    if (smsGuard.isRateLimited(clientIp)) {
+      context.res = { status: 429, body: { error: 'Too many requests' } };
+      return;
+    }
+
+    const submission = smsGuard.validateContactPayload(req.body);
+    if (!submission) {
+      context.res = { status: 400, body: { error: 'Invalid submission' } };
+      return;
+    }
+
+    const { name, email, phone, insurance, notes } = submission;
 
     // Twilio credentials from environment variables
-    const accountSid = process.env.VITE_TWILIO_ACCOUNT_SID;
-    const authToken = process.env.VITE_TWILIO_AUTH_TOKEN;
-    const twilioPhone = process.env.VITE_TWILIO_PHONE_NUMBER;
+    const accountSid = process.env.TWILIO_ACCOUNT_SID || process.env.VITE_TWILIO_ACCOUNT_SID;
+    const authToken = process.env.TWILIO_AUTH_TOKEN || process.env.VITE_TWILIO_AUTH_TOKEN;
+    const twilioPhone = process.env.TWILIO_PHONE_NUMBER || process.env.VITE_TWILIO_PHONE_NUMBER;
     const yourPhone = process.env.VITE_YOUR_PHONE_NUMBER;
 
     if (!accountSid || !authToken || !twilioPhone || !yourPhone) {
