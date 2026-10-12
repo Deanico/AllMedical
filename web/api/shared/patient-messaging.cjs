@@ -43,7 +43,7 @@ const authorizeAdmin = async (req) => {
   const { data, error } = await supabase.auth.getUser(token)
   if (error) {
     console.error('Admin token check failed:', error.message)
-    return { error: { status: 401, message: 'The server could not verify your session. Log out and back in; if it persists, the server Supabase key or URL is wrong.' } }
+    return { error: { status: 401, message: 'The server could not verify your session. Log out and back in; if it persists, the server Supabase key or URL is wrong. (Details: ' + error.message + ')' } }
   }
   if (!data.user || data.user.app_metadata?.role !== 'admin') {
     return { error: { status: 403, message: 'Administrator access is required.' } }
