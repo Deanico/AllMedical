@@ -96,8 +96,22 @@ export default function PatientMessagesPanel({ patient }) {
       </div>
 
       {error && (
-        <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {error}
+        <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 flex flex-wrap items-center justify-between gap-3">
+          <span className="flex-1 min-w-[200px]">{error}</span>
+          {(error.toLowerCase().includes('session') || error.toLowerCase().includes('jwt') || error.toLowerCase().includes('signature') || error.toLowerCase().includes('log out') || error.toLowerCase().includes('administrator')) && (
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await supabase?.auth.signOut({ scope: 'local' })
+                } catch (_) {}
+                window.location.href = '/admin'
+              }}
+              className="inline-flex items-center px-3 py-1.5 border border-red-300 text-xs font-semibold rounded-md text-red-800 bg-white hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 shadow-sm transition-colors whitespace-nowrap cursor-pointer"
+            >
+              Sign Out &amp; Log Back In
+            </button>
+          )}
         </div>
       )}
 

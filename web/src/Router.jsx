@@ -24,9 +24,32 @@ export default function Router() {
       const path = window.location.pathname
 
       if (path === '/admin') {
-        const { data } = await supabase?.auth.getSession() || { data: null }
-        const user = data?.session?.user || null
-        const adminUser = user?.app_metadata?.role === 'admin' ? user : null
+        let adminUser = null
+        if (supabase) {
+          try {
+            const { data, error } = await supabase.auth.getUser()
+            if (error) {
+              console.warn('Admin session validation failed:', error.message)
+              try {
+                await supabase.auth.signOut({ scope: 'local' })
+              } catch (_) {}
+            } else if (data?.user?.app_metadata?.role === 'admin') {
+              adminUser = data.user
+            } else if (data?.user) {
+              try {
+                await supabase.auth.signOut({ scope: 'local' })
+              } catch (_) {}
+            }
+          } catch (sessionErr) {
+            console.error('Error verifying admin session:', sessionErr)
+            if (String(sessionErr?.message || '').toLowerCase().includes('jwt') ||
+                String(sessionErr?.message || '').toLowerCase().includes('signature')) {
+              try {
+                await supabase.auth.signOut({ scope: 'local' })
+              } catch (_) {}
+            }
+          }
+        }
         if (mounted) {
           setAdminEmail(adminUser?.email || null)
           setView(adminUser ? 'adminDashboard' : 'adminLogin')
@@ -124,10 +147,12 @@ export default function Router() {
   }
 
   const handleLogout = async () => {
-    await supabase?.auth.signOut()
+    try {
+      await supabase?.auth.signOut({ scope: 'local' })
+    } catch (_) {}
     setAdminEmail(null)
-    setView('public')
-    window.history.pushState({}, '', '/')
+    setView('adminLogin')
+    window.history.pushState({}, '', '/admin')
   }
 
   const handleClientLogin = (user) => {

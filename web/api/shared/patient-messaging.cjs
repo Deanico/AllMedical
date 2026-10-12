@@ -9,9 +9,19 @@ const getRequiredEnv = (...names) => {
   return value
 }
 
+const getSupabaseUrl = () => {
+  const url = getRequiredEnv('SUPABASE_URL', 'VITE_SUPABASE_URL')
+  return String(url).trim().replace(/\/+$/, '')
+}
+
+const getServiceRoleKey = () => {
+  const key = getRequiredEnv('SUPABASE_SERVICE_ROLE_KEY', 'VITE_SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_SERVICE_KEY')
+  return String(key).trim()
+}
+
 const getServiceClient = () => createClient(
-  getRequiredEnv('VITE_SUPABASE_URL'),
-  getRequiredEnv('SUPABASE_SERVICE_ROLE_KEY'),
+  getSupabaseUrl(),
+  getServiceRoleKey(),
   { auth: { autoRefreshToken: false, persistSession: false } }
 )
 
@@ -43,7 +53,25 @@ const authorizeAdmin = async (req) => {
   const { data, error } = await supabase.auth.getUser(token)
   if (error) {
     console.error('Admin token check failed:', error.message)
-    return { error: { status: 401, message: 'The server could not verify your session. Log out and back in; if it persists, the server Supabase key or URL is wrong. (Details: ' + error.message + ')' } }
+
+    let diagnostic = error.message
+    try {
+      const parts = token.split('.')
+      if (parts.length === 3) {
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'))
+        const tokenRef = payload.ref || payload.iss?.match(/https:\/\/([^.]+)\.supabase\.co/)?.[1]
+        const serverUrl = getSupabaseUrl()
+        const serverRef = serverUrl.match(/https:\/\/([^.]+)\.supabase\.co/)?.[1]
+
+        if (tokenRef && serverRef && tokenRef !== serverRef) {
+          diagnostic += ` [Project mismatch: browser session is for project "${tokenRef}", but server is configured for "${serverRef}". Please log out and sign back in.]`
+        } else if (error.message.includes('signature is invalid')) {
+          diagnostic += ` [Session signature rejected by Supabase (${serverRef || 'configured project'}). The session in your browser is expired or from before Supabase keys were updated. Please log out and sign back in.]`
+        }
+      }
+    } catch (_) {}
+
+    return { error: { status: 401, message: 'The server could not verify your session. Log out and back in; if it persists, the server Supabase key or URL is wrong. (Details: ' + diagnostic + ')' } }
   }
   if (!data.user || data.user.app_metadata?.role !== 'admin') {
     return { error: { status: 403, message: 'Administrator access is required.' } }
