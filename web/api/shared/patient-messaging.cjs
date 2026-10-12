@@ -11,12 +11,12 @@ const getRequiredEnv = (...names) => {
 
 const getSupabaseUrl = () => {
   const url = getRequiredEnv('SUPABASE_URL', 'VITE_SUPABASE_URL')
-  return String(url).trim().replace(/\/+$/, '')
+  return String(url).trim().replace(/^["']|["']$/g, '').replace(/\/+$/, '')
 }
 
 const getServiceRoleKey = () => {
   const key = getRequiredEnv('SUPABASE_SERVICE_ROLE_KEY', 'VITE_SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_SERVICE_KEY')
-  return String(key).trim()
+  return String(key).trim().replace(/^["']|["']$/g, '')
 }
 
 const getServiceClient = () => createClient(
@@ -37,14 +37,21 @@ const getWebhookUrl = () => {
 }
 
 const getRequestHeader = (req, name) => {
-  if (typeof req.get === 'function') return req.get(name)
-  const headers = req.headers || {}
-  return headers[name.toLowerCase()] || headers[name]
+  let value
+  if (typeof req.get === 'function') {
+    value = req.get(name)
+  } else {
+    const headers = req.headers || {}
+    value = headers[name.toLowerCase()] || headers[name]
+  }
+  if (Array.isArray(value)) value = value[0]
+  return typeof value === 'string' ? value : ''
 }
 
 const authorizeAdmin = async (req) => {
-  const authorization = getRequestHeader(req, 'authorization') || ''
-  const token = authorization.match(/^Bearer\s+(.+)$/i)?.[1]
+  // Azure Static Web Apps can overwrite the Authorization header, so check x-supabase-auth first.
+  const rawAuth = getRequestHeader(req, 'x-supabase-auth') || getRequestHeader(req, 'authorization') || ''
+  const token = rawAuth.replace(/^Bearer\s+/i, '').trim().replace(/^["']|["']$/g, '')
   if (!token) {
     return { error: { status: 401, message: 'Sign in as an administrator to continue.' } }
   }
@@ -63,7 +70,9 @@ const authorizeAdmin = async (req) => {
         const serverUrl = getSupabaseUrl()
         const serverRef = serverUrl.match(/https:\/\/([^.]+)\.supabase\.co/)?.[1]
 
-        if (tokenRef && serverRef && tokenRef !== serverRef) {
+        if (payload.iss && !payload.iss.includes('supabase.co')) {
+          diagnostic += ` [Non-Supabase token received from issuer "${payload.iss}". The client Authorization header was likely overridden by hosting proxy; send via X-Supabase-Auth.]`
+        } else if (tokenRef && serverRef && tokenRef !== serverRef) {
           diagnostic += ` [Project mismatch: browser session is for project "${tokenRef}", but server is configured for "${serverRef}". Please log out and sign back in.]`
         } else if (error.message.includes('signature is invalid')) {
           diagnostic += ` [Session signature rejected by Supabase (${serverRef || 'configured project'}). The session in your browser is expired or from before Supabase keys were updated. Please log out and sign back in.]`

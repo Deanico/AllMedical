@@ -14,6 +14,18 @@ export default function PatientMessagesPanel({ patient }) {
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
 
+  const getValidAccessToken = async () => {
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+    if (sessionError) throw sessionError
+    let token = sessionData.session?.access_token
+    const expiresAt = sessionData.session?.expires_at
+    if (!token || (expiresAt && expiresAt * 1000 < Date.now() + 60000)) {
+      const { data: refreshed } = await supabase.auth.refreshSession().catch(() => ({ data: null }))
+      token = refreshed?.session?.access_token || token
+    }
+    return token
+  }
+
   useEffect(() => {
     let cancelled = false
     let refreshInterval
@@ -21,13 +33,11 @@ export default function PatientMessagesPanel({ patient }) {
     const loadMessages = async (showLoading = false) => {
       if (showLoading) setLoading(true)
       try {
-        const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
-        if (sessionError) throw sessionError
-        const accessToken = sessionData.session?.access_token
+        const accessToken = await getValidAccessToken()
         if (!accessToken) throw new Error('Your administrator session has expired. Please sign in again.')
 
         const response = await fetch(`/api/patient-messages/${encodeURIComponent(patient.id)}`, {
-          headers: { Authorization: `Bearer ${accessToken}` }
+          headers: { Authorization: `Bearer ${accessToken}`, 'X-Supabase-Auth': `Bearer ${accessToken}` }
         })
         const result = await response.json()
         if (!response.ok) throw new Error(result.error || 'Unable to load this patient’s messages.')
@@ -59,15 +69,13 @@ export default function PatientMessagesPanel({ patient }) {
     try {
       setSending(true)
       setError('')
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
-      if (sessionError) throw sessionError
-      const accessToken = sessionData.session?.access_token
+      const accessToken = await getValidAccessToken()
       if (!accessToken) throw new Error('Your administrator session has expired. Please sign in again.')
 
       const response = await fetch(`/api/patient-messages/${encodeURIComponent(patient.id)}`, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${accessToken}`,
+          Authorization: `Bearer ${accessToken}`, 'X-Supabase-Auth': `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ body })

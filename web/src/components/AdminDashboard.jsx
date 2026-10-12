@@ -1196,7 +1196,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${sessionData?.session?.access_token || ''}`
+          Authorization: `Bearer ${sessionData?.session?.access_token || ''}`,
+          'X-Supabase-Auth': `Bearer ${sessionData?.session?.access_token || ''}`
         }
       })
 
@@ -2934,7 +2935,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${sessionData?.session?.access_token || ''}`
+          Authorization: `Bearer ${sessionData?.session?.access_token || ''}`,
+          'X-Supabase-Auth': `Bearer ${sessionData?.session?.access_token || ''}`
         },
       })
 
