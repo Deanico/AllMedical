@@ -1,5 +1,6 @@
 const { google } = require('googleapis');
 const patientMessaging = require('../shared/patient-messaging.cjs');
+const { getLeadSheetSources } = require('../shared/lead-sheet-sources.cjs');
 
 module.exports = async function (context, req) {
   context.log('Google Sheets Sync function triggered');
@@ -24,11 +25,11 @@ module.exports = async function (context, req) {
     const supabase = authorization.supabase;
 
     // Get environment variables
-    const sheetId = process.env.GOOGLE_SHEET_ID;
+    const sources = getLeadSheetSources();
     const serviceAccountEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
     const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n');
 
-    if (!sheetId || !serviceAccountEmail || !privateKey) {
+    if (!sources.length || !serviceAccountEmail || !privateKey) {
       context.res = {
         status: 500,
         body: { error: 'Google Sheets credentials not configured' }
@@ -46,27 +47,38 @@ module.exports = async function (context, req) {
 
     const sheets = google.sheets({ version: 'v4', auth });
 
-    // Read data from Google Sheet
-    // Adjust the range based on your sheet structure
-    const range = process.env.GOOGLE_SHEET_RANGE || 'Sheet1!A2:E'; // Starting from row 2 (assuming row 1 is headers)
-    
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: sheetId,
-      range: range,
-    });
+    const rowLimit = Math.max(1, Number(process.env.GOOGLE_SHEET_ROW_LIMIT || 50));
+    const recentRows = [];
+    const sourceErrors = [];
+    let totalRows = 0;
 
-    const rows = response.data.values;
-
-    if (!rows || rows.length === 0) {
-      context.res = {
-        status: 200,
-        body: { added: 0, skipped: 0, message: 'No data found in spreadsheet' }
-      };
-      return;
+    // Read the latest rows from every configured sheet/tab; one failing tab doesn't block the rest
+    for (const source of sources) {
+      try {
+        const response = await sheets.spreadsheets.values.get({
+          spreadsheetId: source.sheetId,
+          range: source.range,
+        });
+        const sourceRows = response.data.values || [];
+        totalRows += sourceRows.length;
+        sourceRows.slice(-rowLimit).forEach((row) => recentRows.push({ row, label: source.label }));
+      } catch (sourceError) {
+        context.log.error(`Sync failed for ${source.range}:`, sourceError.message);
+        sourceErrors.push(`${source.range}: ${sourceError.message}`);
+      }
     }
 
-    const rowLimit = Math.max(1, Number(process.env.GOOGLE_SHEET_ROW_LIMIT || 50));
-    const recentRows = rows.slice(-rowLimit);
+    if (recentRows.length === 0) {
+      if (sourceErrors.length === sources.length) {
+        context.res = { status: 500, body: { error: `Could not read any sheet. ${sourceErrors.join('; ')}` } };
+      } else {
+        context.res = {
+          status: 200,
+          body: { added: 0, skipped: 0, message: 'No data found in spreadsheet', errors: sourceErrors }
+        };
+      }
+      return;
+    }
 
     // Get column mappings from environment (default: A=name, B=email, C=phone, D=insurance, E=notes)
     const nameCol = parseInt(process.env.SHEET_NAME_COLUMN || '0');
@@ -79,7 +91,7 @@ module.exports = async function (context, req) {
     const candidates = [];
     let skipped = 0;
 
-    for (const row of recentRows) {
+    for (const { row, label } of recentRows) {
       const email = clean(row[emailCol]).toLowerCase();
       const name = clean(row[nameCol]);
       const phone = clean(row[phoneCol]);
@@ -96,7 +108,8 @@ module.exports = async function (context, req) {
         email,
         phone,
         insurance,
-        notes
+        notes,
+        label
       });
     }
 
@@ -107,8 +120,9 @@ module.exports = async function (context, req) {
           added: 0,
           skipped,
           processed: recentRows.length,
-          totalRows: rows.length,
+          totalRows,
           rowLimit,
+          errors: sourceErrors,
           message: 'No valid rows found in selected range'
         }
       };
@@ -141,7 +155,7 @@ module.exports = async function (context, req) {
           email: candidate.email,
           phone: candidate.phone,
           insurance: candidate.insurance,
-          notes: candidate.notes ? `${candidate.notes} (Source: Google Sheets)` : 'Source: Google Sheets',
+          notes: candidate.notes ? `${candidate.notes} (Source: Google Sheets - ${candidate.label})` : `Source: Google Sheets (${candidate.label})`,
           stage: 'new'
         }]);
 
@@ -161,9 +175,10 @@ module.exports = async function (context, req) {
         added: added,
         skipped: skipped,
         processed: recentRows.length,
-        totalRows: rows.length,
+        totalRows,
         rowLimit,
-        message: `Successfully synced ${added} new leads from the latest ${recentRows.length} rows, skipped ${skipped}`
+        errors: sourceErrors,
+        message: `Successfully synced ${added} new leads from ${sources.length} sheet range(s) (${recentRows.length} rows checked), skipped ${skipped}${sourceErrors.length ? `. Could not read: ${sourceErrors.join('; ')}` : ''}`
       }
     };
 

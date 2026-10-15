@@ -7,6 +7,9 @@ import https from 'https'
 import crypto from 'crypto'
 import patientMessaging from './api/shared/patient-messaging.cjs'
 import smsGuard from './api/shared/sms-guard.cjs'
+import leadSheetSources from './api/shared/lead-sheet-sources.cjs'
+
+const { getLeadSheetSources } = leadSheetSources
 
 dotenv.config()
 
@@ -176,11 +179,11 @@ app.post('/api/sync-google-sheets', async (req, res) => {
     const supabase = authorization.supabase
 
     // Get environment variables
-    const sheetId = process.env.GOOGLE_SHEET_ID
+    const sources = getLeadSheetSources()
     const serviceAccountEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL
     const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n')
 
-    if (!sheetId || !serviceAccountEmail || !privateKey) {
+    if (!sources.length || !serviceAccountEmail || !privateKey) {
       return res.status(500).json({ error: 'Google Sheets credentials not configured' })
     }
 
@@ -194,22 +197,33 @@ app.post('/api/sync-google-sheets', async (req, res) => {
 
     const sheets = google.sheets({ version: 'v4', auth })
 
-    // Read data from Google Sheet
-    const range = process.env.GOOGLE_SHEET_RANGE || 'Sheet1!A2:R'
-    
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: sheetId,
-      range: range,
-    })
+    const rowLimit = Math.max(1, Number(process.env.GOOGLE_SHEET_ROW_LIMIT || 50))
+    const recentRows = []
+    const sourceErrors = []
+    let totalRows = 0
 
-    const rows = response.data.values
-
-    if (!rows || rows.length === 0) {
-      return res.status(200).json({ added: 0, skipped: 0, message: 'No data found in spreadsheet' })
+    // Read the latest rows from every configured sheet/tab; one failing tab doesn't block the rest
+    for (const source of sources) {
+      try {
+        const response = await sheets.spreadsheets.values.get({
+          spreadsheetId: source.sheetId,
+          range: source.range,
+        })
+        const sourceRows = response.data.values || []
+        totalRows += sourceRows.length
+        sourceRows.slice(-rowLimit).forEach((row) => recentRows.push({ row, label: source.label }))
+      } catch (sourceError) {
+        console.error(`Sync failed for ${source.range}:`, sourceError.message)
+        sourceErrors.push(`${source.range}: ${sourceError.message}`)
+      }
     }
 
-    const rowLimit = Math.max(1, Number(process.env.GOOGLE_SHEET_ROW_LIMIT || 50))
-    const recentRows = rows.slice(-rowLimit)
+    if (recentRows.length === 0) {
+      if (sourceErrors.length === sources.length) {
+        return res.status(500).json({ error: `Could not read any sheet. ${sourceErrors.join('; ')}` })
+      }
+      return res.status(200).json({ added: 0, skipped: 0, message: 'No data found in spreadsheet', errors: sourceErrors })
+    }
 
     // Column mappings (O=14, P=15, Q=16, R=17 in 0-indexed)
     const insuranceCol = 14  // Column O
@@ -221,7 +235,7 @@ app.post('/api/sync-google-sheets', async (req, res) => {
     const candidates = []
     let skipped = 0
 
-    for (const row of recentRows) {
+    for (const { row, label } of recentRows) {
       const email = clean(row[emailCol]).toLowerCase()
       const name = clean(row[nameCol])
       const phone = clean(row[phoneCol])
@@ -236,7 +250,8 @@ app.post('/api/sync-google-sheets', async (req, res) => {
         name,
         email,
         phone,
-        insurance
+        insurance,
+        label
       })
     }
 
@@ -245,8 +260,9 @@ app.post('/api/sync-google-sheets', async (req, res) => {
         added: 0,
         skipped,
         processed: recentRows.length,
-        totalRows: rows.length,
+        totalRows,
         rowLimit,
+        errors: sourceErrors,
         message: 'No valid rows found in selected range'
       })
     }
@@ -275,7 +291,7 @@ app.post('/api/sync-google-sheets', async (req, res) => {
           email: candidate.email,
           phone: candidate.phone,
           insurance: candidate.insurance,
-          notes: 'Source: Google Sheets',
+          notes: `Source: Google Sheets (${candidate.label})`,
           stage: 'new'
         }])
 
@@ -293,9 +309,10 @@ app.post('/api/sync-google-sheets', async (req, res) => {
       added: added,
       skipped: skipped,
       processed: recentRows.length,
-      totalRows: rows.length,
+      totalRows,
       rowLimit,
-      message: `Successfully synced ${added} new leads from the latest ${recentRows.length} rows, skipped ${skipped}`
+      errors: sourceErrors,
+      message: `Successfully synced ${added} new leads from ${sources.length} sheet range(s) (${recentRows.length} rows checked), skipped ${skipped}${sourceErrors.length ? `. Could not read: ${sourceErrors.join('; ')}` : ''}`
     })
 
   } catch (error) {
