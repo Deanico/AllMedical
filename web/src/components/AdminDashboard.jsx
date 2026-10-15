@@ -6699,15 +6699,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         )}
 
         {activeView === 'allMessages' && (
-          <AllMessagesPanel
-            onOpenPatient={(patientId) => {
-              const lead = leads.find((l) => l.id === patientId)
-              if (!lead) return
-              setActiveView('clients')
-              setSelectedClient(lead)
-              setActiveClientTab('messages')
-            }}
-          />
+          <AllMessagesPanel />
         )}
 
         {/* Products View */}

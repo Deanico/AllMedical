@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import PatientMessagesPanel from './PatientMessagesPanel'
 
 const formatTime = (value) => {
   if (!value) return ''
@@ -7,12 +8,15 @@ const formatTime = (value) => {
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleString()
 }
 
-export default function AllMessagesPanel({ onOpenPatient }) {
+const conversationKey = (m) => m.patient_id || `phone:${m.direction === 'outbound' ? m.to_phone : m.from_phone}`
+
+export default function AllMessagesPanel() {
   const [messages, setMessages] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
-  const [filter, setFilter] = useState('all')
+  const [selectedKey, setSelectedKey] = useState(null)
+  const [refreshToken, setRefreshToken] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -51,41 +55,89 @@ export default function AllMessagesPanel({ onOpenPatient }) {
       cancelled = true
       window.clearInterval(interval)
     }
-  }, [])
+  }, [refreshToken])
+
+  // Messages arrive newest first, so the first one seen per conversation is the latest.
+  const conversations = useMemo(() => {
+    const map = new Map()
+    messages.forEach((m) => {
+      const key = conversationKey(m)
+      if (!map.has(key)) {
+        const phone = m.direction === 'outbound' ? m.to_phone : m.from_phone
+        map.set(key, {
+          key,
+          patientId: m.patient_id,
+          name: m.leads?.name || null,
+          phone: m.leads?.phone || phone,
+          latest: m,
+          messages: []
+        })
+      }
+      map.get(key).messages.push(m)
+    })
+    return Array.from(map.values())
+  }, [messages])
 
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase()
-    return messages.filter((m) => {
-      if (filter === 'unmatched' && m.patient_id) return false
-      if (filter === 'inbound' && m.direction !== 'inbound') return false
-      if (filter === 'outbound' && m.direction !== 'outbound') return false
-      if (!term) return true
-      return [m.body, m.leads?.name, m.from_phone, m.to_phone]
-        .some((v) => String(v || '').toLowerCase().includes(term))
-    })
-  }, [messages, search, filter])
+    if (!term) return conversations
+    return conversations.filter((c) =>
+      [c.name, c.phone, c.latest.body].some((v) => String(v || '').toLowerCase().includes(term))
+    )
+  }, [conversations, search])
+
+  const selected = conversations.find((c) => c.key === selectedKey)
+
+  if (selected) {
+    return (
+      <section className="space-y-4 p-6">
+        <button
+          type="button"
+          onClick={() => {
+            setSelectedKey(null)
+            setRefreshToken((n) => n + 1)
+          }}
+          className="text-sm font-semibold text-blue-600 hover:underline"
+        >
+          ← Back to all conversations
+        </button>
+        <div className="rounded-lg bg-white p-4 shadow">
+          {selected.patientId ? (
+            <PatientMessagesPanel
+              patient={{ id: selected.patientId, name: selected.name || selected.phone, phone: selected.phone }}
+            />
+          ) : (
+            <div className="space-y-3">
+              <div>
+                <h3 className="text-base font-semibold text-gray-900">{selected.phone}</h3>
+                <p className="text-sm text-amber-700">
+                  This number doesn’t match a patient, so replies can’t be sent from here.
+                </p>
+              </div>
+              <div className="max-h-[28rem] space-y-3 overflow-y-auto rounded-lg border border-gray-200 bg-gray-50 p-4">
+                {[...selected.messages].reverse().map((m) => (
+                  <div key={m.id} className="rounded-2xl border border-gray-200 bg-white px-4 py-2">
+                    <p className="whitespace-pre-wrap break-words text-sm text-gray-900">{m.body}</p>
+                    <p className="mt-1 text-xs text-gray-500">{formatTime(m.sent_at || m.created_at)}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+    )
+  }
 
   return (
-    <section className="space-y-4 p-6" aria-label="All text messages">
-      <div className="flex flex-wrap items-center gap-3">
-        <input
-          type="search"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search name, phone, or message…"
-          className="min-w-[240px] flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
-        <select
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-        >
-          <option value="all">All messages</option>
-          <option value="inbound">Received</option>
-          <option value="outbound">Sent</option>
-          <option value="unmatched">Unmatched numbers</option>
-        </select>
-      </div>
+    <section className="space-y-4 p-6" aria-label="All text message conversations">
+      <input
+        type="search"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Search name, phone, or message…"
+        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+      />
 
       {error && (
         <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
@@ -93,43 +145,35 @@ export default function AllMessagesPanel({ onOpenPatient }) {
 
       <div className="overflow-hidden rounded-lg bg-white shadow">
         {loading ? (
-          <p className="p-6 text-sm text-gray-500">Loading messages…</p>
+          <p className="p-6 text-sm text-gray-500">Loading conversations…</p>
         ) : visible.length ? (
           <ul className="divide-y divide-gray-200">
-            {visible.map((m) => {
-              const outbound = m.direction === 'outbound'
-              const phone = outbound ? m.to_phone : m.from_phone
-              return (
-                <li key={m.id} className="p-4">
+            {visible.map((c) => (
+              <li key={c.key}>
+                <button
+                  type="button"
+                  onClick={() => setSelectedKey(c.key)}
+                  className="w-full p-4 text-left hover:bg-gray-50"
+                >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
-                      <span className="font-semibold text-gray-900">{m.leads?.name || 'Unknown sender'}</span>
-                      <span className="text-sm text-gray-500">{phone}</span>
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${outbound ? 'bg-blue-50 text-blue-700' : 'bg-green-50 text-green-700'}`}>
-                        {outbound ? 'Sent' : 'Received'}
-                      </span>
-                      {!m.patient_id && (
+                      <span className="font-semibold text-gray-900">{c.name || 'Unknown sender'}</span>
+                      <span className="text-sm text-gray-500">{c.phone}</span>
+                      {!c.patientId && (
                         <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">No patient match</span>
                       )}
                     </div>
-                    <span className="text-xs text-gray-500">{formatTime(m.sent_at || m.created_at)}</span>
+                    <span className="text-xs text-gray-500">{formatTime(c.latest.sent_at || c.latest.created_at)}</span>
                   </div>
-                  <p className="mt-2 whitespace-pre-wrap break-words text-sm text-gray-800">{m.body}</p>
-                  {m.patient_id && onOpenPatient && (
-                    <button
-                      type="button"
-                      onClick={() => onOpenPatient(m.patient_id)}
-                      className="mt-2 text-xs font-semibold text-blue-600 hover:underline"
-                    >
-                      Open conversation
-                    </button>
-                  )}
-                </li>
-              )
-            })}
+                  <p className="mt-1 truncate text-sm text-gray-600">
+                    {c.latest.direction === 'outbound' ? 'You: ' : ''}{c.latest.body}
+                  </p>
+                </button>
+              </li>
+            ))}
           </ul>
         ) : (
-          <p className="p-6 text-center text-sm text-gray-500">No messages found.</p>
+          <p className="p-6 text-center text-sm text-gray-500">No conversations found.</p>
         )}
       </div>
     </section>
