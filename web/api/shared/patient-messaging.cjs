@@ -91,7 +91,25 @@ const authorizeAdmin = async (req) => {
 
 const validatePatientId = (patientId) => UUID_PATTERN.test(String(patientId || ''))
 
+const getAllMessages = async (req) => {
+  const authorization = await authorizeAdmin(req)
+  if (authorization.error) {
+    return { status: authorization.error.status, body: { error: authorization.error.message } }
+  }
+
+  const { data, error } = await authorization.supabase
+    .from('patient_sms_messages')
+    .select('id, patient_id, direction, from_phone, to_phone, body, status, sent_at, created_at, leads(name, phone)')
+    .order('created_at', { ascending: false })
+    .limit(500)
+
+  if (error) throw error
+  return { status: 200, body: { messages: data || [] } }
+}
+
 const getPatientMessages = async (req, patientId) => {
+  if (patientId === 'all') return getAllMessages(req)
+
   if (!validatePatientId(patientId)) {
     return { status: 400, body: { error: 'A valid patient ID is required.' } }
   }

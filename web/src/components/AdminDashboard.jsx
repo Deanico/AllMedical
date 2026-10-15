@@ -4,6 +4,7 @@ import ClientPortalDashboard from './ClientPortalDashboard'
 import ClientClaimsPanel from './ClientClaimsPanel'
 import SecureFileLink from './SecureFileLink'
 import PatientMessagesPanel from './PatientMessagesPanel'
+import AllMessagesPanel from './AllMessagesPanel'
 import { generatePhysicianOrder, downloadPDF, getPhysicianOrderSupplierLabel } from '../lib/generatePhysicianOrder'
 import { generateTreatmentRecords, getTreatmentRecordSupplierLabel } from '../lib/generateTreatmentRecords'
 import { generateHardshipForm } from '../lib/generateHardshipForm'
@@ -185,6 +186,14 @@ const DashboardIcon = ({ name, className = 'h-5 w-5' }) => {
         <path d="M21 12a9 9 0 0 1-15.5 6.36" />
         <path d="M3 12A9 9 0 0 1 18.5 5.64" />
         <path d="M3 18v-5h5M21 6v5h-5" />
+      </svg>
+    )
+  }
+
+  if (name === 'messages') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
       </svg>
     )
   }
@@ -3010,6 +3019,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     { id: 'dashboard', name: 'Dashboard', icon: 'dashboard' },
     { id: 'leads', name: 'Leads', icon: 'leads', badge: leads.length },
     { id: 'clients', name: 'Clients', icon: 'clients', badge: activeQualifiedLeads.length },
+    { id: 'allMessages', name: 'All Messages', icon: 'messages' },
     { id: 'shipping', name: 'Shipping', icon: 'shipping' },
     { id: 'products', name: 'Products', icon: 'products' },
     { id: 'calendar', name: 'Calendar', icon: 'calendar' },
@@ -6686,6 +6696,18 @@ export default function AdminDashboard({ userEmail, onLogout }) {
               })()
             )}
           </div>
+        )}
+
+        {activeView === 'allMessages' && (
+          <AllMessagesPanel
+            onOpenPatient={(patientId) => {
+              const lead = leads.find((l) => l.id === patientId)
+              if (!lead) return
+              setActiveView('clients')
+              setSelectedClient(lead)
+              setActiveClientTab('messages')
+            }}
+          />
         )}
 
         {/* Products View */}
