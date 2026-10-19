@@ -776,7 +776,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
             fetchShippedOrders()
           ])
 
-          if (selectedClient?.id) {
+          if (selectedClient?.stage === 'qualified') {
             await fetchClientProducts(selectedClient.id)
           }
         } catch (error) {
@@ -811,13 +811,16 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       supabase.removeChannel(pendingOrdersChannel)
       supabase.removeChannel(clientProductsChannel)
     }
-  }, [selectedClient?.id])
+  }, [selectedClient?.id, selectedClient?.stage])
 
   useEffect(() => {
-    if (selectedClient) {
+    if (selectedClient?.stage === 'qualified') {
       fetchDoctors(selectedClient.id)
       fetchClientProducts(selectedClient.id)
       fetchClientOrderHistory(selectedClient.id)
+    }
+
+    if (selectedClient) {
       setShowOrderHistory(false)
       setProductNeeded(selectedClient.product_needed || '')
       setPortalInviteMessage(null)
@@ -841,7 +844,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         clearTimeout(productNeededTimerRef.current)
       }
     }
-  }, [selectedClient])
+  }, [selectedClient, selectedClient?.stage])
 
   const fetchLeads = async () => {
     if (!supabase) {
@@ -2208,6 +2211,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     if (!supabase || !selectedClient) return
 
     try {
+      const isQualifiedClient = selectedClient.stage === 'qualified'
       // Format birthday to include time at noon UTC to prevent timezone shift issues
       const birthdayValue = editForm.birthday ? `${editForm.birthday}T12:00:00` : null;
       const removeInsuranceCard = async (url) => {
@@ -2249,10 +2253,12 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         return publicUrl
       }
 
-      const [insuranceCardFrontUrl, insuranceCardBackUrl] = await Promise.all([
-        uploadInsuranceCard(editForm.insurance_card_front_file, 'front'),
-        uploadInsuranceCard(editForm.insurance_card_back_file, 'back')
-      ])
+      const [insuranceCardFrontUrl, insuranceCardBackUrl] = isQualifiedClient
+        ? await Promise.all([
+          uploadInsuranceCard(editForm.insurance_card_front_file, 'front'),
+          uploadInsuranceCard(editForm.insurance_card_back_file, 'back')
+        ])
+        : [null, null]
 
       const updatePayload = {
         name: editForm.name,
@@ -2263,8 +2269,6 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         insurance_group_number: editForm.insurance_group_number || null,
         insurance_cardholder_name: editForm.insurance_cardholder_name || null,
         insurance_cardholder_relationship: editForm.insurance_cardholder_relationship || null,
-        insurance_card_front_url: insuranceCardFrontUrl,
-        insurance_card_back_url: insuranceCardBackUrl,
         insurance_deductible: editForm.insurance_deductible ? parseFloat(editForm.insurance_deductible) : null,
         insurance_oop_max: editForm.insurance_oop_max ? parseFloat(editForm.insurance_oop_max) : null,
         birthday: birthdayValue,
@@ -2277,6 +2281,11 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         prior_auth_start_date: editForm.prior_auth_start_date || null,
         prior_auth_end_date: editForm.prior_auth_end_date || null,
         is_paused: Boolean(editForm.is_paused)
+      }
+
+      if (isQualifiedClient) {
+        updatePayload.insurance_card_front_url = insuranceCardFrontUrl
+        updatePayload.insurance_card_back_url = insuranceCardBackUrl
       }
 
       if (editForm.payment_status) {
@@ -2299,12 +2308,14 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     }
   }
 
-  const openEditModal = () => {
+  const openEditModal = (client = selectedClient) => {
+    if (!client) return
+
     // Properly format birthday for date input to match display
     // When database has "1980-12-30T00:00:00Z", we need to extract the LOCAL date, not UTC
     let birthdayValue = '';
-    if (selectedClient.birthday) {
-      const dateStr = selectedClient.birthday.split('T')[0]; // Get YYYY-MM-DD
+    if (client.birthday) {
+      const dateStr = client.birthday.split('T')[0]; // Get YYYY-MM-DD
       const [year, month, day] = dateStr.split('-');
       // Create date in local timezone and format for input
       const localDate = new Date(year, month - 1, day);
@@ -2315,35 +2326,36 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     }
     
     setEditForm({
-      name: selectedClient.name,
-      email: selectedClient.email,
-      phone: selectedClient.phone,
-      insurance: selectedClient.insurance,
-      insurance_id: selectedClient.insurance_id || '',
-      insurance_group_number: selectedClient.insurance_group_number || '',
-      insurance_cardholder_name: selectedClient.insurance_cardholder_name || '',
-      insurance_cardholder_relationship: selectedClient.insurance_cardholder_relationship || '',
-      insurance_card_front_url: selectedClient.insurance_card_front_url || '',
-      insurance_card_back_url: selectedClient.insurance_card_back_url || '',
+      name: client.name,
+      email: client.email,
+      phone: client.phone,
+      insurance: client.insurance,
+      insurance_id: client.insurance_id || '',
+      insurance_group_number: client.insurance_group_number || '',
+      insurance_cardholder_name: client.insurance_cardholder_name || '',
+      insurance_cardholder_relationship: client.insurance_cardholder_relationship || '',
+      insurance_card_front_url: client.insurance_card_front_url || '',
+      insurance_card_back_url: client.insurance_card_back_url || '',
       insurance_card_front_file: null,
       insurance_card_back_file: null,
       insurance_card_front_removed: false,
       insurance_card_back_removed: false,
-      insurance_deductible: selectedClient.insurance_deductible?.toString() || '',
-      insurance_oop_max: selectedClient.insurance_oop_max?.toString() || '',
+      insurance_deductible: client.insurance_deductible?.toString() || '',
+      insurance_oop_max: client.insurance_oop_max?.toString() || '',
       birthday: birthdayValue,
-      address_line1: selectedClient.address_line1 || '',
-      city: selectedClient.city || '',
-      state: selectedClient.state || '',
-      zip_code: selectedClient.zip_code || '',
-      shipping_duration: selectedClient.shipping_duration || '',
-      payment_status: selectedClient.payment_status || '',
-      prior_auth_status: selectedClient.prior_auth_status || '',
-      prior_auth_start_date: selectedClient.prior_auth_start_date || '',
-      prior_auth_end_date: selectedClient.prior_auth_end_date || '',
-      is_paused: Boolean(selectedClient.is_paused),
-      auto_ship_enabled: Boolean(selectedClient.auto_ship_enabled)
+      address_line1: client.address_line1 || '',
+      city: client.city || '',
+      state: client.state || '',
+      zip_code: client.zip_code || '',
+      shipping_duration: client.shipping_duration || '',
+      payment_status: client.payment_status || '',
+      prior_auth_status: client.prior_auth_status || '',
+      prior_auth_start_date: client.prior_auth_start_date || '',
+      prior_auth_end_date: client.prior_auth_end_date || '',
+      is_paused: Boolean(client.is_paused),
+      auto_ship_enabled: Boolean(client.auto_ship_enabled)
     })
+    setSelectedClient(client)
     setShowEditClientModal(true)
   }
 
@@ -3457,7 +3469,14 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                     allLeads.map((lead) => (
                       <tr key={lead.id} className="hover:bg-gray-50">
                         <td className="px-3 py-3 text-sm font-medium text-gray-900 truncate">
-                          {lead.name}
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(lead)}
+                            className="text-left hover:text-blue-700 hover:underline focus:outline-none focus:underline"
+                            title={`Edit ${lead.stage === 'qualified' ? 'client' : 'lead'} information`}
+                          >
+                            {lead.name}
+                          </button>
                         </td>
                         <td className="px-3 py-3 text-sm text-gray-600 truncate">
                           {lead.phone}
@@ -3500,9 +3519,14 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   <div key={lead.id} className="p-4 hover:bg-gray-50">
                     <div className="space-y-3">
                       <div className="flex justify-between items-start">
-                        <div className="font-semibold text-gray-900 text-base">
+                        <button
+                          type="button"
+                          onClick={() => openEditModal(lead)}
+                          className="font-semibold text-gray-900 text-base text-left hover:text-blue-700 hover:underline focus:outline-none focus:underline"
+                          title={`Edit ${lead.stage === 'qualified' ? 'client' : 'lead'} information`}
+                        >
                           {lead.name}
-                        </div>
+                        </button>
                         <select
                           value={lead.stage}
                           onChange={(e) => updateStage(lead.id, e.target.value)}
@@ -7679,7 +7703,14 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       {showEditClientModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
           <div className="bg-white rounded-lg p-6 w-full max-w-md my-8 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-xl font-bold text-gray-900 mb-4">Edit Client</h3>
+            <h3 className="text-xl font-bold text-gray-900 mb-2">
+              Edit {selectedClient?.stage === 'qualified' ? 'Client' : 'Lead'}
+            </h3>
+            {selectedClient?.stage !== 'qualified' && (
+              <p className="text-sm text-gray-600 mb-4">
+                Add qualification details here. Client documents and claims are available after qualification.
+              </p>
+            )}
             <form onSubmit={handleEditClient} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -7742,7 +7773,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                 />
               </div>
               <div className="border-t pt-4">
-                <h4 className="text-sm font-semibold text-gray-700 mb-3">Insurance Card</h4>
+                <h4 className="text-sm font-semibold text-gray-700 mb-3">Insurance Details</h4>
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -7785,63 +7816,67 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                       placeholder="Name as shown on card"
                     />
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Card Front
-                      </label>
-                      <input
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp"
-                        onChange={(e) => setEditForm({ ...editForm, insurance_card_front_file: e.target.files?.[0] || null })}
-                        className="w-full text-sm text-gray-600"
-                      />
-                      {editForm.insurance_card_front_url && (
-                        <div className="flex items-center gap-2 mt-1">
-                          <SecureFileLink bucket="insurance-cards" value={editForm.insurance_card_front_url} className="text-xs text-blue-600 hover:underline">
-                            View saved front
-                          </SecureFileLink>
-                          <button
-                            type="button"
-                            aria-label="Remove saved insurance card front"
-                            title="Remove saved front"
-                            onClick={() => setEditForm({ ...editForm, insurance_card_front_url: '', insurance_card_front_file: null, insurance_card_front_removed: true })}
-                            className="text-red-600 hover:text-red-800 text-sm leading-none"
-                          >
-                            🗑
-                          </button>
+                  {selectedClient?.stage === 'qualified' && (
+                    <>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Card Front
+                          </label>
+                          <input
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp"
+                            onChange={(e) => setEditForm({ ...editForm, insurance_card_front_file: e.target.files?.[0] || null })}
+                            className="w-full text-sm text-gray-600"
+                          />
+                          {editForm.insurance_card_front_url && (
+                            <div className="flex items-center gap-2 mt-1">
+                              <SecureFileLink bucket="insurance-cards" value={editForm.insurance_card_front_url} className="text-xs text-blue-600 hover:underline">
+                                View saved front
+                              </SecureFileLink>
+                              <button
+                                type="button"
+                                aria-label="Remove saved insurance card front"
+                                title="Remove saved front"
+                                onClick={() => setEditForm({ ...editForm, insurance_card_front_url: '', insurance_card_front_file: null, insurance_card_front_removed: true })}
+                                className="text-red-600 hover:text-red-800 text-sm leading-none"
+                              >
+                                🗑
+                              </button>
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Card Back
-                      </label>
-                      <input
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp"
-                        onChange={(e) => setEditForm({ ...editForm, insurance_card_back_file: e.target.files?.[0] || null })}
-                        className="w-full text-sm text-gray-600"
-                      />
-                      {editForm.insurance_card_back_url && (
-                        <div className="flex items-center gap-2 mt-1">
-                          <SecureFileLink bucket="insurance-cards" value={editForm.insurance_card_back_url} className="text-xs text-blue-600 hover:underline">
-                            View saved back
-                          </SecureFileLink>
-                          <button
-                            type="button"
-                            aria-label="Remove saved insurance card back"
-                            title="Remove saved back"
-                            onClick={() => setEditForm({ ...editForm, insurance_card_back_url: '', insurance_card_back_file: null, insurance_card_back_removed: true })}
-                            className="text-red-600 hover:text-red-800 text-sm leading-none"
-                          >
-                            🗑
-                          </button>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Card Back
+                          </label>
+                          <input
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp"
+                            onChange={(e) => setEditForm({ ...editForm, insurance_card_back_file: e.target.files?.[0] || null })}
+                            className="w-full text-sm text-gray-600"
+                          />
+                          {editForm.insurance_card_back_url && (
+                            <div className="flex items-center gap-2 mt-1">
+                              <SecureFileLink bucket="insurance-cards" value={editForm.insurance_card_back_url} className="text-xs text-blue-600 hover:underline">
+                                View saved back
+                              </SecureFileLink>
+                              <button
+                                type="button"
+                                aria-label="Remove saved insurance card back"
+                                title="Remove saved back"
+                                onClick={() => setEditForm({ ...editForm, insurance_card_back_url: '', insurance_card_back_file: null, insurance_card_back_removed: true })}
+                                className="text-red-600 hover:text-red-800 text-sm leading-none"
+                              >
+                                🗑
+                              </button>
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  </div>
-                  <p className="text-xs text-gray-500">Upload JPG, PNG, or WebP images. Saving without a new image keeps the existing card image.</p>
+                      </div>
+                      <p className="text-xs text-gray-500">Upload JPG, PNG, or WebP images. Saving without a new image keeps the existing card image.</p>
+                    </>
+                  )}
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -8121,7 +8156,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   type="submit"
                   className="px-4 py-2 text-white bg-blue-600 hover:bg-blue-700 rounded-md"
                 >
-                  Save Changes
+                  Save {selectedClient?.stage === 'qualified' ? 'Changes' : 'Lead Information'}
                 </button>
               </div>
             </form>
