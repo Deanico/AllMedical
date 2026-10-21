@@ -3909,7 +3909,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                         {portalInviteSending ? 'Sending Invite...' : 'Send Portal Invite'}
                       </button>
                       <button
-                        onClick={openEditModal}
+                        onClick={() => openEditModal(selectedClient)}
                         className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm"
                       >
                         Edit
@@ -7984,6 +7984,46 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   />
                   Paused Client
                 </label>
+              </div>
+
+              <div className="border-t pt-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-sm font-semibold text-gray-700">Products</h4>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAssignProductClient(selectedClient)
+                      setShowAssignProductModal(true)
+                    }}
+                    className="px-3 py-1 bg-green-600 text-white text-xs rounded-md hover:bg-green-700 font-medium"
+                  >
+                    + Add Product
+                  </button>
+                </div>
+                {clientProducts.length === 0 ? (
+                  <div className="text-sm text-gray-500 bg-gray-50 p-3 rounded-md text-center">No products yet.</div>
+                ) : (
+                  <div className="space-y-2">
+                    {clientProducts.map(cp => (
+                      <div key={cp.id} className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg p-2 text-sm">
+                        <span>{cp.products?.name} × {cp.quantity}</span>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!confirm(`Remove ${cp.products?.name}?`)) return
+                            const { error } = await supabase.from('client_products').update({ active: false }).eq('id', cp.id)
+                            if (error) { alert('Failed to remove product'); return }
+                            await fetchClientProducts(selectedClient.id)
+                            await fetchAllClientProducts()
+                          }}
+                          className="text-red-600 hover:text-red-700 text-xs font-medium"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="border-t pt-4">
