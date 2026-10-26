@@ -142,6 +142,13 @@ module.exports = async function (context, req) {
 
     const existingEmailSet = new Set((existingLeads || []).map((lead) => String(lead.email || '').toLowerCase()));
 
+    // Re-tag leads that already exist but appear in an AI sheet
+    const aiEmails = [...new Set(candidates.filter((c) => c.handling === 'ai' && existingEmailSet.has(c.email)).map((c) => c.email))];
+    if (aiEmails.length) {
+      const { error: retagError } = await supabase.from('leads').update({ handling: 'ai' }).in('email', aiEmails);
+      if (retagError) context.log.error('Retag error:', retagError);
+    }
+
     let added = 0;
     for (const candidate of candidates) {
       if (existingEmailSet.has(candidate.email)) {
