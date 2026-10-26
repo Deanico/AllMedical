@@ -211,7 +211,7 @@ app.post('/api/sync-google-sheets', async (req, res) => {
         })
         const sourceRows = response.data.values || []
         totalRows += sourceRows.length
-        sourceRows.slice(-rowLimit).forEach((row) => recentRows.push({ row, label: source.label }))
+        sourceRows.slice(-rowLimit).forEach((row) => recentRows.push({ row, label: source.label, handling: source.handling }))
       } catch (sourceError) {
         console.error(`Sync failed for ${source.range}:`, sourceError.message)
         sourceErrors.push(`${source.range}: ${sourceError.message}`)
@@ -235,7 +235,7 @@ app.post('/api/sync-google-sheets', async (req, res) => {
     const candidates = []
     let skipped = 0
 
-    for (const { row, label } of recentRows) {
+    for (const { row, label, handling } of recentRows) {
       const email = clean(row[emailCol]).toLowerCase()
       const name = clean(row[nameCol])
       const phone = clean(row[phoneCol])
@@ -251,7 +251,8 @@ app.post('/api/sync-google-sheets', async (req, res) => {
         email,
         phone,
         insurance,
-        label
+        label,
+        handling
       })
     }
 
@@ -292,6 +293,7 @@ app.post('/api/sync-google-sheets', async (req, res) => {
           phone: candidate.phone,
           insurance: candidate.insurance,
           notes: `Source: Google Sheets (${candidate.label})`,
+          handling: candidate.handling,
           stage: 'new'
         }])
 

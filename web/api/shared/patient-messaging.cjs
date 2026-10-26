@@ -99,7 +99,7 @@ const getAllMessages = async (req) => {
 
   const { data, error } = await authorization.supabase
     .from('patient_sms_messages')
-    .select('id, patient_id, direction, from_phone, to_phone, body, status, sent_at, created_at, leads(name, phone)')
+    .select('id, patient_id, direction, from_phone, to_phone, body,     status, sent_by, sent_at, created_at, leads(name, phone, handling)')
     .order('created_at', { ascending: false })
     .limit(500)
 

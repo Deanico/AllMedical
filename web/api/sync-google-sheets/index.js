@@ -61,7 +61,7 @@ module.exports = async function (context, req) {
         });
         const sourceRows = response.data.values || [];
         totalRows += sourceRows.length;
-        sourceRows.slice(-rowLimit).forEach((row) => recentRows.push({ row, label: source.label }));
+        sourceRows.slice(-rowLimit).forEach((row) => recentRows.push({ row, label: source.label, handling: source.handling }));
       } catch (sourceError) {
         context.log.error(`Sync failed for ${source.range}:`, sourceError.message);
         sourceErrors.push(`${source.range}: ${sourceError.message}`);
@@ -91,7 +91,7 @@ module.exports = async function (context, req) {
     const candidates = [];
     let skipped = 0;
 
-    for (const { row, label } of recentRows) {
+    for (const { row, label, handling } of recentRows) {
       const email = clean(row[emailCol]).toLowerCase();
       const name = clean(row[nameCol]);
       const phone = clean(row[phoneCol]);
@@ -109,7 +109,8 @@ module.exports = async function (context, req) {
         phone,
         insurance,
         notes,
-        label
+        label,
+        handling
       });
     }
 
@@ -156,6 +157,7 @@ module.exports = async function (context, req) {
           phone: candidate.phone,
           insurance: candidate.insurance,
           notes: candidate.notes ? `${candidate.notes} (Source: Google Sheets - ${candidate.label})` : `Source: Google Sheets (${candidate.label})`,
+          handling: candidate.handling,
           stage: 'new'
         }]);
 

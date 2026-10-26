@@ -3477,6 +3477,11 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                           >
                             {lead.name}
                           </button>
+                          {lead.handling && (
+                            <span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-medium ${lead.handling === 'ai' ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'}`}>
+                              {lead.handling === 'ai' ? 'AI' : 'Call'}
+                            </span>
+                          )}
                         </td>
                         <td className="px-3 py-3 text-sm text-gray-600 truncate">
                           {lead.phone}

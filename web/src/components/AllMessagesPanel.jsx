@@ -10,7 +10,26 @@ const formatTime = (value) => {
 
 const conversationKey = (m) => m.patient_id || `phone:${m.direction === 'outbound' ? m.to_phone : m.from_phone}`
 
+const FILTERS = [
+  { id: 'all', label: 'All' },
+  { id: 'unanswered', label: 'Unanswered' },
+  { id: 'tookover', label: 'Took over' },
+  { id: 'responded', label: 'Responded' },
+  { id: 'cold', label: 'Cold' }
+]
+
+const handlingBadge = (c) => {
+  if (c.handling === 'ai') {
+    return c.tookOver
+      ? { text: 'AI - Took over', className: 'bg-indigo-100 text-indigo-800' }
+      : { text: 'AI', className: 'bg-purple-100 text-purple-800' }
+  }
+  if (c.handling === 'call') return { text: 'Call', className: 'bg-green-100 text-green-800' }
+  return null
+}
+
 export default function AllMessagesPanel() {
+  const [filter, setFilter] = useState('all')
   const [messages, setMessages] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -73,18 +92,35 @@ export default function AllMessagesPanel() {
           messages: []
         })
       }
-      map.get(key).messages.push(m)
+      const conversation = map.get(key)
+      conversation.messages.push(m)
+      if (m.direction === 'inbound') conversation.hasReply = true
+      if (m.direction === 'outbound' && m.sent_by) conversation.tookOver = true
     })
-    return Array.from(map.values())
+    return Array.from(map.values()).map((c) => {
+      const handling = c.messages.find((m) => m.leads?.handling)?.leads.handling
+      const unanswered = c.latest.direction === 'inbound'
+      return {
+        ...c,
+        handling,
+        tags: {
+          unanswered,
+          tookover: !!c.tookOver,
+          responded: !!c.hasReply && !unanswered,
+          cold: !c.hasReply
+        }
+      }
+    })
   }, [messages])
 
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase()
-    if (!term) return conversations
-    return conversations.filter((c) =>
-      [c.name, c.phone, c.latest.body].some((v) => String(v || '').toLowerCase().includes(term))
-    )
-  }, [conversations, search])
+    return conversations.filter((c) => {
+      if (filter !== 'all' && !c.tags[filter]) return false
+      if (!term) return true
+      return [c.name, c.phone, c.latest.body].some((v) => String(v || '').toLowerCase().includes(term))
+    })
+  }, [conversations, search, filter])
 
   const selected = conversations.find((c) => c.key === selectedKey)
 
@@ -139,7 +175,24 @@ export default function AllMessagesPanel() {
         className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
       />
 
-      {error && (
+      <div className="flex flex-wrap gap-2">
+        {FILTERS.map((f) => {
+          const count = f.id === 'all' ? conversations.length : conversations.filter((c) => c.tags[f.id]).length
+          return (
+            <button
+              key={f.id}
+              type="button"
+              onClick={() => setFilter(f.id)}
+              className={`rounded-full px-3 py-1 text-sm font-medium ${
+                filter === f.id ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              {f.label} ({count})
+            </button>
+          )
+        })}
+      </div>
+
         <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
       )}
 
@@ -159,6 +212,14 @@ export default function AllMessagesPanel() {
                     <div className="flex items-center gap-2">
                       <span className="font-semibold text-gray-900">{c.name || 'Unknown sender'}</span>
                       <span className="text-sm text-gray-500">{c.phone}</span>
+                      {handlingBadge(c) && (
+                        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${handlingBadge(c).className}`}>
+                          {handlingBadge(c).text}
+                        </span>
+                      )}
+                      {c.tags.unanswered && (
+                        <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">Unanswered</span>
+                      )}
                       {!c.patientId && (
                         <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">No patient match</span>
                       )}

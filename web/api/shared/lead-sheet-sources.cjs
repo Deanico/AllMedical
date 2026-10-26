@@ -4,21 +4,23 @@
 const getLeadSheetSources = (env = process.env) => {
   const sources = []
 
-  const add = (sheetId, rangeValue) => {
+  // GOOGLE_SHEET_HANDLING[_n] = "ai" (AI qualifier campaign) or "call" (you call them; default)
+  const add = (sheetId, rangeValue, handlingValue) => {
     if (!sheetId) return
+    const handling = String(handlingValue || '').trim().toLowerCase() === 'ai' ? 'ai' : 'call'
     String(rangeValue || 'Sheet1!A2:R')
       .split('|')
       .map((range) => range.trim())
       .filter(Boolean)
       .forEach((range) => {
         const tab = range.split('!')[0].replace(/^'|'$/g, '')
-        sources.push({ sheetId: sheetId.trim(), range, label: tab })
+        sources.push({ sheetId: sheetId.trim(),         range, label: tab, handling })
       })
   }
 
-  add(env.GOOGLE_SHEET_ID, env.GOOGLE_SHEET_RANGE)
+          add(env.GOOGLE_SHEET_ID, env.GOOGLE_SHEET_RANGE, env.GOOGLE_SHEET_HANDLING)
   for (let i = 2; i <= 9; i++) {
-    add(env[`GOOGLE_SHEET_ID_${i}`], env[`GOOGLE_SHEET_RANGE_${i}`])
+            add(env[`GOOGLE_SHEET_ID_${i}`], env[`GOOGLE_SHEET_RANGE_${i}`], env[`GOOGLE_SHEET_HANDLING_${i}`])
   }
 
   return sources
