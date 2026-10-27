@@ -785,31 +785,40 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       }, 250)
     }
 
-    const pendingOrdersChannel = supabase
-      .channel('admin-pending-orders-realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'pending_orders' },
-        scheduleRealtimeRefresh
-      )
-      .subscribe()
+    // Realtime is optional: some phones/networks block WebSockets, and that must not crash the page
+    let pendingOrdersChannel = null
+    let clientProductsChannel = null
+    try {
+      pendingOrdersChannel = supabase
+        .channel('admin-pending-orders-realtime')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'pending_orders' },
+          scheduleRealtimeRefresh
+        )
+        .subscribe()
 
-    const clientProductsChannel = supabase
-      .channel('admin-client-products-realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'client_products' },
-        scheduleRealtimeRefresh
-      )
-      .subscribe()
+      clientProductsChannel = supabase
+        .channel('admin-client-products-realtime')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'client_products' },
+          scheduleRealtimeRefresh
+        )
+        .subscribe()
+    } catch (realtimeError) {
+      console.warn('Realtime updates unavailable:', realtimeError)
+    }
 
     return () => {
       cancelled = true
       if (refreshTimer) {
         clearTimeout(refreshTimer)
       }
-      supabase.removeChannel(pendingOrdersChannel)
-      supabase.removeChannel(clientProductsChannel)
+      try {
+        if (pendingOrdersChannel) supabase.removeChannel(pendingOrdersChannel)
+        if (clientProductsChannel) supabase.removeChannel(clientProductsChannel)
+      } catch (_) {}
     }
   }, [selectedClient?.id, selectedClient?.stage])
 
