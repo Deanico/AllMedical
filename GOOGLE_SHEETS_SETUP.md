@@ -95,9 +95,12 @@ SHEET_PHONE_COLUMN=2
 SHEET_INSURANCE_COLUMN=3
 SHEET_NOTES_COLUMN=4
 SHEET_AD_NAME_COLUMN=3
+SHEET_CREATED_TIME_COLUMN=1
 ```
 
-Rows whose `ad_name` starts with `AI Agent` are automatically tagged as AI leads. The default ad-name column is D (zero-based index `3`); change `SHEET_AD_NAME_COLUMN` if it is elsewhere. Include every source tab in `GOOGLE_SHEET_RANGE`, separated by `|` (for example, `Sheet1!A2:R|Sheet2!A2:R`).
+Rows whose `ad_name` starts with `AI Agent` are automatically tagged as AI leads. The default ad-name column is D (zero-based index `3`); change `SHEET_AD_NAME_COLUMN` if it is elsewhere. Lead order and displayed dates use the original `created_time` column (B / zero-based index `1`), configurable with `SHEET_CREATED_TIME_COLUMN`. Include every source tab in `GOOGLE_SHEET_RANGE`, separated by `|` (for example, `Sheet1!A2:R|Sheet2!A2:R`).
+
+Before deploying this timestamp change, run [`add-lead-source-created-at.sql`](./web/add-lead-source-created-at.sql) in the Supabase SQL Editor. The next sync backfills timestamps for matching existing leads in the rows it processes.
 
 ### Important Notes:
 

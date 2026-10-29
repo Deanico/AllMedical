@@ -1,6 +1,11 @@
 const { google } = require('googleapis');
 const patientMessaging = require('../shared/patient-messaging.cjs');
-const { getLeadHandling, getLeadSheetSources } = require('../shared/lead-sheet-sources.cjs');
+const {
+  getLeadHandling,
+  getLeadSheetSources,
+  getLeadSourceCreatedAt,
+  updateExistingLeads
+} = require('../shared/lead-sheet-sources.cjs');
 
 module.exports = async function (context, req) {
   context.log('Google Sheets Sync function triggered');
@@ -87,6 +92,7 @@ module.exports = async function (context, req) {
     const insuranceCol = parseInt(process.env.SHEET_INSURANCE_COLUMN || '3');
     const notesCol = parseInt(process.env.SHEET_NOTES_COLUMN || '4');
     const adNameCol = parseInt(process.env.SHEET_AD_NAME_COLUMN || '3');
+    const createdAtCol = parseInt(process.env.SHEET_CREATED_TIME_COLUMN || '1');
 
     const clean = (value) => String(value ?? '').trim();
     const candidates = [];
@@ -99,6 +105,7 @@ module.exports = async function (context, req) {
       const insurance = clean(row[insuranceCol]);
       const notes = clean(row[notesCol]);
       const handling = getLeadHandling(row, sourceHandling, adNameCol);
+      const leadSourceCreatedAt = getLeadSourceCreatedAt(row, createdAtCol);
 
       if (!email || !name) {
         skipped++;
@@ -112,7 +119,8 @@ module.exports = async function (context, req) {
         insurance,
         notes,
         label,
-        handling
+        handling,
+        lead_source_created_at: leadSourceCreatedAt
       });
     }
 
@@ -135,7 +143,7 @@ module.exports = async function (context, req) {
     const uniqueEmails = [...new Set(candidates.map((candidate) => candidate.email))];
     const { data: existingLeads, error: existingError } = await supabase
       .from('leads')
-      .select('email')
+      .select('email, lead_source_created_at')
       .in('email', uniqueEmails);
 
     if (existingError) {
@@ -144,12 +152,7 @@ module.exports = async function (context, req) {
 
     const existingEmailSet = new Set((existingLeads || []).map((lead) => String(lead.email || '').toLowerCase()));
 
-    // Re-tag leads that already exist but appear in an AI sheet
-    const aiEmails = [...new Set(candidates.filter((c) => c.handling === 'ai' && existingEmailSet.has(c.email)).map((c) => c.email))];
-    if (aiEmails.length) {
-      const { error: retagError } = await supabase.from('leads').update({ handling: 'ai' }).in('email', aiEmails);
-      if (retagError) throw retagError;
-    }
+    await updateExistingLeads(supabase, candidates, existingLeads);
 
     let added = 0;
     for (const candidate of candidates) {
@@ -167,6 +170,7 @@ module.exports = async function (context, req) {
           insurance: candidate.insurance,
           notes: candidate.notes ? `${candidate.notes} (Source: Google Sheets - ${candidate.label})` : `Source: Google Sheets (${candidate.label})`,
           handling: candidate.handling,
+          lead_source_created_at: candidate.lead_source_created_at,
           stage: 'new'
         }]);
 

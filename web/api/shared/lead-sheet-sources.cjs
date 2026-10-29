@@ -37,4 +37,49 @@ const getLeadHandling = (row, handling, adNameColumn = 3) => {
   return handling === 'ai' || /^AI Agent\b/i.test(adName) ? 'ai' : handling
 }
 
-module.exports = { getLeadHandling, getLeadSheetSources }
+const getLeadSourceCreatedAt = (row, createdAtColumn = 1) => {
+  const value = String(row[createdAtColumn] ?? '').trim()
+  if (!value) return null
+
+  const timestamp = new Date(value)
+  return Number.isNaN(timestamp.getTime()) ? null : timestamp.toISOString()
+}
+
+const updateExistingLeads = async (supabase, candidates, existingLeads) => {
+  const existingByEmail = new Map(
+    (existingLeads || []).map((lead) => [String(lead.email || '').toLowerCase(), lead])
+  )
+  const updatesByEmail = new Map()
+
+  for (const candidate of candidates) {
+    const existing = existingByEmail.get(candidate.email)
+    if (!existing) continue
+
+    const update = updatesByEmail.get(candidate.email) || {}
+    if (candidate.handling === 'ai') update.handling = 'ai'
+    if (
+      !existing.lead_source_created_at &&
+      candidate.lead_source_created_at &&
+      (!update.lead_source_created_at ||
+        new Date(candidate.lead_source_created_at) < new Date(update.lead_source_created_at))
+    ) {
+      update.lead_source_created_at = candidate.lead_source_created_at
+    }
+    if (Object.keys(update).length) updatesByEmail.set(candidate.email, update)
+  }
+
+  const updates = [...updatesByEmail.entries()]
+  for (let index = 0; index < updates.length; index += 25) {
+    const results = await Promise.all(updates.slice(index, index + 25).map(async ([email, update]) => {
+      const { error } = await supabase.from('leads').update(update).eq('email', email)
+      return { email, error }
+    }))
+
+    const failedUpdate = results.find((result) => result.error)
+    if (failedUpdate) {
+      throw new Error(`Failed to update existing lead ${failedUpdate.email}: ${failedUpdate.error.message}`)
+    }
+  }
+}
+
+module.exports = { getLeadHandling, getLeadSheetSources, getLeadSourceCreatedAt, updateExistingLeads }

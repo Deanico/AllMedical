@@ -21,11 +21,14 @@ export default function LeadsScreen({ navigation }) {
     try {
       const { data, error } = await supabase
         .from('leads')
-        .select('*')
-        .order('created_at', { ascending: false });
+        .select('*');
 
       if (error) throw error;
-      setLeads(data || []);
+      setLeads((data || []).sort((a, b) => {
+        const firstDate = new Date(a.lead_source_created_at || a.created_at).getTime();
+        const secondDate = new Date(b.lead_source_created_at || b.created_at).getTime();
+        return secondDate - firstDate;
+      }));
     } catch (error) {
       Alert.alert('Error', 'Failed to load leads: ' + error.message);
     } finally {
@@ -77,7 +80,7 @@ export default function LeadsScreen({ navigation }) {
     >
       <View style={styles.leadHeader}>
         <Text style={styles.leadName}>{item.name || 'No Name'}</Text>
-        <Text style={styles.leadDate}>{formatDate(item.created_at)}</Text>
+        <Text style={styles.leadDate}>{formatDate(item.lead_source_created_at || item.created_at)}</Text>
       </View>
       
       <TouchableOpacity

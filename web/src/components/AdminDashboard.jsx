@@ -3015,6 +3015,10 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   })
 
   const allLeads = activeTab === 'leads' ? filteredLeads : leads // Show filtered leads in Leads tab
+  const orderedLeads = [...allLeads].sort((a, b) =>
+    getDateTimeValue(b.lead_source_created_at || b.created_at) -
+    getDateTimeValue(a.lead_source_created_at || a.created_at)
+  )
   const qualifiedLeads = leads.filter(lead => lead.stage === 'qualified')
   const activeQualifiedLeads = qualifiedLeads.filter(lead => !lead.is_paused)
   const todayDateString = getLocalTodayDateString()
@@ -3398,7 +3402,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   {(() => {
                     // Get recent leads (last 5)
                     const recentLeads = [...leads].sort((a, b) => 
-                      getDateTimeValue(b.created_at) - getDateTimeValue(a.created_at)
+                      getDateTimeValue(b.lead_source_created_at || b.created_at) -
+                      getDateTimeValue(a.lead_source_created_at || a.created_at)
                     ).slice(0, 5)
                     
                     return recentLeads.length > 0 ? recentLeads.map((lead) => (
@@ -3411,7 +3416,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                           <p className="text-xs text-gray-500">{lead.email}</p>
                         </div>
                         <div className="text-xs text-gray-500">
-                          {formatShortDate(lead.created_at)}
+                          {formatShortDate(lead.lead_source_created_at || lead.created_at)}
                         </div>
                       </div>
                     )) : (
@@ -3468,14 +3473,14 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {allLeads.length === 0 ? (
+                  {orderedLeads.length === 0 ? (
                     <tr>
                       <td colSpan="5" className="px-6 py-8 text-center text-gray-500">
                         No leads yet
                       </td>
                     </tr>
                   ) : (
-                    allLeads.map((lead) => (
+                    orderedLeads.map((lead) => (
                       <tr key={lead.id} className="hover:bg-gray-50">
                         <td className="px-3 py-3 text-sm font-medium text-gray-900 truncate">
                           <button

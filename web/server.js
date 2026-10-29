@@ -9,7 +9,12 @@ import patientMessaging from './api/shared/patient-messaging.cjs'
 import smsGuard from './api/shared/sms-guard.cjs'
 import leadSheetSources from './api/shared/lead-sheet-sources.cjs'
 
-const { getLeadHandling, getLeadSheetSources } = leadSheetSources
+const {
+  getLeadHandling,
+  getLeadSheetSources,
+  getLeadSourceCreatedAt,
+  updateExistingLeads
+} = leadSheetSources
 
 dotenv.config()
 
@@ -231,6 +236,7 @@ app.post('/api/sync-google-sheets', async (req, res) => {
     const nameCol = 16       // Column Q
     const phoneCol = 17      // Column R
     const adNameCol = Number.parseInt(process.env.SHEET_AD_NAME_COLUMN || '3', 10)
+    const createdAtCol = Number.parseInt(process.env.SHEET_CREATED_TIME_COLUMN || '1', 10)
 
     const clean = (value) => String(value ?? '').trim()
     const candidates = []
@@ -242,6 +248,7 @@ app.post('/api/sync-google-sheets', async (req, res) => {
       const phone = clean(row[phoneCol])
       const insurance = clean(row[insuranceCol])
       const handling = getLeadHandling(row, sourceHandling, adNameCol)
+      const leadSourceCreatedAt = getLeadSourceCreatedAt(row, createdAtCol)
 
       if (!email || !name) {
         skipped++
@@ -254,7 +261,8 @@ app.post('/api/sync-google-sheets', async (req, res) => {
         phone,
         insurance,
         label,
-        handling
+        handling,
+        lead_source_created_at: leadSourceCreatedAt
       })
     }
 
@@ -273,19 +281,14 @@ app.post('/api/sync-google-sheets', async (req, res) => {
     const uniqueEmails = [...new Set(candidates.map(candidate => candidate.email))]
     const { data: existingLeads, error: existingError } = await supabase
       .from('leads')
-      .select('email')
+      .select('email, lead_source_created_at')
       .in('email', uniqueEmails)
 
     if (existingError) throw existingError
 
     const existingEmailSet = new Set((existingLeads || []).map(lead => String(lead.email || '').toLowerCase()))
 
-    // Re-tag leads that already exist but appear in an AI sheet
-    const aiEmails = [...new Set(candidates.filter(c => c.handling === 'ai' && existingEmailSet.has(c.email)).map(c => c.email))]
-    if (aiEmails.length) {
-      const { error: retagError } = await supabase.from('leads').update({ handling: 'ai' }).in('email', aiEmails)
-      if (retagError) throw retagError
-    }
+    await updateExistingLeads(supabase, candidates, existingLeads)
 
     let added = 0
     for (const candidate of candidates) {
@@ -303,6 +306,7 @@ app.post('/api/sync-google-sheets', async (req, res) => {
           insurance: candidate.insurance,
           notes: `Source: Google Sheets (${candidate.label})`,
           handling: candidate.handling,
+          lead_source_created_at: candidate.lead_source_created_at,
           stage: 'new'
         }])
 
