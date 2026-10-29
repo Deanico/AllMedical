@@ -9,7 +9,7 @@ import patientMessaging from './api/shared/patient-messaging.cjs'
 import smsGuard from './api/shared/sms-guard.cjs'
 import leadSheetSources from './api/shared/lead-sheet-sources.cjs'
 
-const { getLeadSheetSources } = leadSheetSources
+const { getLeadHandling, getLeadSheetSources } = leadSheetSources
 
 dotenv.config()
 
@@ -197,7 +197,7 @@ app.post('/api/sync-google-sheets', async (req, res) => {
 
     const sheets = google.sheets({ version: 'v4', auth })
 
-    const rowLimit = Math.max(1, Number(process.env.GOOGLE_SHEET_ROW_LIMIT || 50))
+    const rowLimit = Math.max(1, Number(process.env.GOOGLE_SHEET_ROW_LIMIT || 1000))
     const recentRows = []
     const sourceErrors = []
     let totalRows = 0
@@ -230,16 +230,18 @@ app.post('/api/sync-google-sheets', async (req, res) => {
     const emailCol = 15      // Column P
     const nameCol = 16       // Column Q
     const phoneCol = 17      // Column R
+    const adNameCol = Number.parseInt(process.env.SHEET_AD_NAME_COLUMN || '3', 10)
 
     const clean = (value) => String(value ?? '').trim()
     const candidates = []
     let skipped = 0
 
-    for (const { row, label, handling } of recentRows) {
+    for (const { row, label, handling: sourceHandling } of recentRows) {
       const email = clean(row[emailCol]).toLowerCase()
       const name = clean(row[nameCol])
       const phone = clean(row[phoneCol])
       const insurance = clean(row[insuranceCol])
+      const handling = getLeadHandling(row, sourceHandling, adNameCol)
 
       if (!email || !name) {
         skipped++
@@ -282,7 +284,7 @@ app.post('/api/sync-google-sheets', async (req, res) => {
     const aiEmails = [...new Set(candidates.filter(c => c.handling === 'ai' && existingEmailSet.has(c.email)).map(c => c.email))]
     if (aiEmails.length) {
       const { error: retagError } = await supabase.from('leads').update({ handling: 'ai' }).in('email', aiEmails)
-      if (retagError) console.error('Retag error:', retagError)
+      if (retagError) throw retagError
     }
 
     let added = 0

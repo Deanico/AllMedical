@@ -94,7 +94,10 @@ SHEET_EMAIL_COLUMN=1
 SHEET_PHONE_COLUMN=2
 SHEET_INSURANCE_COLUMN=3
 SHEET_NOTES_COLUMN=4
+SHEET_AD_NAME_COLUMN=3
 ```
+
+Rows whose `ad_name` starts with `AI Agent` are automatically tagged as AI leads. The default ad-name column is D (zero-based index `3`); change `SHEET_AD_NAME_COLUMN` if it is elsewhere. Include every source tab in `GOOGLE_SHEET_RANGE`, separated by `|` (for example, `Sheet1!A2:R|Sheet2!A2:R`).
 
 ### Important Notes:
 

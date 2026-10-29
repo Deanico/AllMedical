@@ -1,6 +1,6 @@
 const { google } = require('googleapis');
 const patientMessaging = require('../shared/patient-messaging.cjs');
-const { getLeadSheetSources } = require('../shared/lead-sheet-sources.cjs');
+const { getLeadHandling, getLeadSheetSources } = require('../shared/lead-sheet-sources.cjs');
 
 module.exports = async function (context, req) {
   context.log('Google Sheets Sync function triggered');
@@ -47,7 +47,7 @@ module.exports = async function (context, req) {
 
     const sheets = google.sheets({ version: 'v4', auth });
 
-    const rowLimit = Math.max(1, Number(process.env.GOOGLE_SHEET_ROW_LIMIT || 50));
+    const rowLimit = Math.max(1, Number(process.env.GOOGLE_SHEET_ROW_LIMIT || 1000));
     const recentRows = [];
     const sourceErrors = [];
     let totalRows = 0;
@@ -86,17 +86,19 @@ module.exports = async function (context, req) {
     const phoneCol = parseInt(process.env.SHEET_PHONE_COLUMN || '2');
     const insuranceCol = parseInt(process.env.SHEET_INSURANCE_COLUMN || '3');
     const notesCol = parseInt(process.env.SHEET_NOTES_COLUMN || '4');
+    const adNameCol = parseInt(process.env.SHEET_AD_NAME_COLUMN || '3');
 
     const clean = (value) => String(value ?? '').trim();
     const candidates = [];
     let skipped = 0;
 
-    for (const { row, label, handling } of recentRows) {
+    for (const { row, label, handling: sourceHandling } of recentRows) {
       const email = clean(row[emailCol]).toLowerCase();
       const name = clean(row[nameCol]);
       const phone = clean(row[phoneCol]);
       const insurance = clean(row[insuranceCol]);
       const notes = clean(row[notesCol]);
+      const handling = getLeadHandling(row, sourceHandling, adNameCol);
 
       if (!email || !name) {
         skipped++;
@@ -146,7 +148,7 @@ module.exports = async function (context, req) {
     const aiEmails = [...new Set(candidates.filter((c) => c.handling === 'ai' && existingEmailSet.has(c.email)).map((c) => c.email))];
     if (aiEmails.length) {
       const { error: retagError } = await supabase.from('leads').update({ handling: 'ai' }).in('email', aiEmails);
-      if (retagError) context.log.error('Retag error:', retagError);
+      if (retagError) throw retagError;
     }
 
     let added = 0;

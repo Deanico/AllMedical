@@ -32,4 +32,9 @@ const getLeadSheetSources = (env = process.env) => {
   return sources
 }
 
-module.exports = { getLeadSheetSources }
+const getLeadHandling = (row, handling, adNameColumn = 3) => {
+  const adName = String(row[adNameColumn] ?? '').trim()
+  return handling === 'ai' || /^AI Agent\b/i.test(adName) ? 'ai' : handling
+}
+
+module.exports = { getLeadHandling, getLeadSheetSources }
