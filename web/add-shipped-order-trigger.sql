@@ -1,6 +1,5 @@
 -- Trigger: when a pending order is marked ordered, update the linked client_product schedule.
--- Logic: next_ship_date = order_date + GREATEST(1, FLOOR(supply_days - 7))
--- where supply_days comes from quantity * product.days_per_unit, then frequency_days, then 90.
+-- Logic: next_ship_date = order_date + frequency_days, defaulting to 80 days.
 
 BEGIN;
 
@@ -10,10 +9,7 @@ LANGUAGE plpgsql
 AS $$
 DECLARE
   order_date date;
-  client_quantity numeric;
-  product_days_per_unit numeric;
   frequency_days numeric;
-  supply_days numeric;
   days_to_add integer;
 BEGIN
   IF NEW.status IS DISTINCT FROM 'ordered' THEN
@@ -33,32 +29,20 @@ BEGIN
 
   order_date := COALESCE(NEW.order_placed_at::date, CURRENT_DATE);
 
-  SELECT
-    cp.quantity,
-    cp.frequency_days,
-    p.days_per_unit
-  INTO
-    client_quantity,
-    frequency_days,
-    product_days_per_unit
+  SELECT cp.frequency_days
+  INTO frequency_days
   FROM client_products cp
-  LEFT JOIN products p ON p.id = cp.product_id
   WHERE cp.id = NEW.client_product_id;
 
   IF NOT FOUND THEN
     RETURN NEW;
   END IF;
 
-  IF client_quantity IS NOT NULL AND client_quantity > 0
-     AND product_days_per_unit IS NOT NULL AND product_days_per_unit > 0 THEN
-    supply_days := client_quantity * product_days_per_unit;
-  ELSIF frequency_days IS NOT NULL AND frequency_days > 0 THEN
-    supply_days := frequency_days;
+  IF frequency_days IS NOT NULL AND frequency_days > 0 THEN
+    days_to_add := frequency_days::integer;
   ELSE
-    supply_days := 90;
+    days_to_add := 80;
   END IF;
-
-  days_to_add := GREATEST(1, FLOOR(supply_days - 7)::integer);
 
   UPDATE client_products
   SET

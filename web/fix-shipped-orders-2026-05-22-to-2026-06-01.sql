@@ -1,7 +1,7 @@
 -- One-time repair for shipped orders that were scheduled with legacy 88-day logic.
 -- Recomputes next_ship_date using:
 --   floor((quantity * products.days_per_unit) - 2)
--- with fallbacks to frequency_days, then 90-day default.
+-- with fallbacks to frequency_days, then 80-day default.
 --
 -- Target window (inclusive): 2026-05-22 to 2026-06-01
 --
@@ -82,7 +82,7 @@ WITH params AS (
           WHEN sb.frequency_days IS NOT NULL
                AND sb.frequency_days > 0
             THEN sb.frequency_days::numeric - 2
-          ELSE 88::numeric
+          ELSE 80::numeric
         END
       )::int
     ) AS days_to_add
@@ -167,7 +167,7 @@ WITH params AS (
           WHEN sb.frequency_days IS NOT NULL
                AND sb.frequency_days > 0
             THEN sb.frequency_days::numeric - 2
-          ELSE 88::numeric
+          ELSE 80::numeric
         END
       )::int
     ) AS days_to_add

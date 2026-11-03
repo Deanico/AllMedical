@@ -212,6 +212,18 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
     return upcoming || clientProducts[0]
   }, [clientProducts])
 
+  const portalFrequency = useMemo(() => {
+    if (clientProducts.length === 0) return 'Not set'
+
+    const frequencies = new Set(
+      clientProducts.map((item) => {
+        const frequency = Number(item.frequency_days)
+        return Number.isFinite(frequency) && frequency > 0 ? frequency : 80
+      })
+    )
+    return frequencies.size === 1 ? `${frequencies.values().next().value} days` : 'Custom'
+  }, [clientProducts])
+
   const activeOrder = useMemo(() => {
     if (clientOrders.length === 0) return null
 
@@ -699,8 +711,8 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
               </div>
               <div className="portal-info-card p-5">
                 <p className="text-xs uppercase tracking-[0.15em] font-semibold text-slate-500">Frequency</p>
-                <p className="text-xl font-bold text-slate-900 mt-2">{nextShipment?.frequency_days || 0} days</p>
-                <p className="text-sm text-slate-600 mt-1">Typical refill cycle</p>
+                <p className="text-xl font-bold text-slate-900 mt-2">{portalFrequency}</p>
+                <p className="text-sm text-slate-600 mt-1">Overall refill frequency</p>
               </div>
             </div>
 
@@ -765,7 +777,7 @@ export default function ClientPortalDashboard({ user, onLogout, previewMode = fa
                         </div>
                         <div className="mt-3 text-sm text-slate-600 flex flex-wrap gap-x-4 gap-y-1">
                           <span>Quantity: {item.quantity || 0}</span>
-                          <span>Frequency: {item.frequency_days || 0} days</span>
+                          <span>Frequency: {Number(item.frequency_days) > 0 ? item.frequency_days : 80} days</span>
                         </div>
                       </div>
                     ))}

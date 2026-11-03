@@ -1,4 +1,4 @@
--- Adds a patient-level 80-day auto-ship override.
+-- Adds patient auto-ship support and sets the default shipment cycle to 80 days.
 -- Run this migration after the existing shipping automation migrations.
 
 BEGIN;
@@ -19,11 +19,7 @@ LANGUAGE plpgsql
 AS $$
 DECLARE
   order_date date;
-  patient_auto_ship_enabled boolean;
-  client_quantity numeric;
-  product_days_per_unit numeric;
   frequency_days numeric;
-  supply_days numeric;
   days_to_add integer;
 BEGIN
   IF NEW.status IS DISTINCT FROM 'ordered' THEN
@@ -43,38 +39,19 @@ BEGIN
 
   order_date := COALESCE(NEW.order_placed_at::date, CURRENT_DATE);
 
-  SELECT
-    COALESCE(l.auto_ship_enabled, false),
-    cp.quantity,
-    cp.frequency_days,
-    p.days_per_unit
-  INTO
-    patient_auto_ship_enabled,
-    client_quantity,
-    frequency_days,
-    product_days_per_unit
+  SELECT cp.frequency_days
+  INTO frequency_days
   FROM public.client_products cp
-  JOIN public.leads l ON l.id = cp.lead_id
-  LEFT JOIN public.products p ON p.id = cp.product_id
   WHERE cp.id = NEW.client_product_id;
 
   IF NOT FOUND THEN
     RETURN NEW;
   END IF;
 
-  IF patient_auto_ship_enabled THEN
-    days_to_add := 80;
+  IF frequency_days IS NOT NULL AND frequency_days > 0 THEN
+    days_to_add := frequency_days::integer;
   ELSE
-    IF client_quantity IS NOT NULL AND client_quantity > 0
-       AND product_days_per_unit IS NOT NULL AND product_days_per_unit > 0 THEN
-      supply_days := client_quantity * product_days_per_unit;
-    ELSIF frequency_days IS NOT NULL AND frequency_days > 0 THEN
-      supply_days := frequency_days;
-    ELSE
-      supply_days := 90;
-    END IF;
-
-    days_to_add := GREATEST(1, FLOOR(supply_days - 7)::integer);
+    days_to_add := 80;
   END IF;
 
   UPDATE public.client_products
@@ -90,8 +67,12 @@ $$;
 WITH recent_order AS (
   SELECT DISTINCT ON (po.client_product_id)
     po.client_product_id,
-    (COALESCE(po.order_placed_at, po.created_at)::date + 80)::date AS next_ship_date
+    (
+      COALESCE(po.order_placed_at, po.created_at)::date
+      + CASE WHEN cp.frequency_days > 0 THEN cp.frequency_days ELSE 80 END
+    )::date AS next_ship_date
   FROM public.pending_orders po
+  JOIN public.client_products cp ON cp.id = po.client_product_id
   WHERE po.status = 'ordered'
     AND po.client_product_id IS NOT NULL
     AND COALESCE(po.order_placed_at, po.created_at) >= NOW() - INTERVAL '14 days'

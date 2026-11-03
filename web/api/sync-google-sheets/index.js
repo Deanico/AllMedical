@@ -4,6 +4,7 @@ const {
   getLeadHandling,
   getLeadSheetSources,
   getLeadSourceCreatedAt,
+  getExistingLeads,
   updateExistingLeads
 } = require('../shared/lead-sheet-sources.cjs');
 
@@ -140,15 +141,7 @@ module.exports = async function (context, req) {
       return;
     }
 
-    const uniqueEmails = [...new Set(candidates.map((candidate) => candidate.email))];
-    const { data: existingLeads, error: existingError } = await supabase
-      .from('leads')
-      .select('email, lead_source_created_at')
-      .in('email', uniqueEmails);
-
-    if (existingError) {
-      throw existingError;
-    }
+    const existingLeads = await getExistingLeads(supabase, candidates.map((candidate) => candidate.email));
 
     const existingEmailSet = new Set((existingLeads || []).map((lead) => String(lead.email || '').toLowerCase()));
 
@@ -201,7 +194,11 @@ module.exports = async function (context, req) {
     context.log.error('Sync error:', error);
     context.res = {
       status: 500,
-      body: { error: error.message || 'Failed to sync from Google Sheets' }
+      body: {
+        error: error.message === 'fetch failed'
+          ? `Network request failed (${error.cause?.code || error.cause?.message || 'unknown'}). Check SUPABASE_URL and internet access on the server.`
+          : error.message || 'Failed to sync from Google Sheets'
+      }
     };
   }
 };

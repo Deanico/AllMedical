@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS client_products (
   lead_id UUID REFERENCES leads(id) ON DELETE CASCADE,
   product_id UUID REFERENCES products(id) ON DELETE CASCADE,
   quantity INTEGER NOT NULL DEFAULT 1,
-  frequency_days INTEGER DEFAULT 30, -- how often to ship (typically 30 or 90 days)
+  frequency_days INTEGER DEFAULT 80, -- how often to ship
   notes TEXT,
   active BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT NOW(),

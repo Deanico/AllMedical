@@ -13,6 +13,7 @@ const {
   getLeadHandling,
   getLeadSheetSources,
   getLeadSourceCreatedAt,
+  getExistingLeads,
   updateExistingLeads
 } = leadSheetSources
 
@@ -278,13 +279,7 @@ app.post('/api/sync-google-sheets', async (req, res) => {
       })
     }
 
-    const uniqueEmails = [...new Set(candidates.map(candidate => candidate.email))]
-    const { data: existingLeads, error: existingError } = await supabase
-      .from('leads')
-      .select('email, lead_source_created_at')
-      .in('email', uniqueEmails)
-
-    if (existingError) throw existingError
+    const existingLeads = await getExistingLeads(supabase, candidates.map(candidate => candidate.email))
 
     const existingEmailSet = new Set((existingLeads || []).map(lead => String(lead.email || '').toLowerCase()))
 
@@ -332,7 +327,10 @@ app.post('/api/sync-google-sheets', async (req, res) => {
 
   } catch (error) {
     console.error('Sync error:', error)
-    return res.status(500).json({ error: error.message || 'Failed to sync from Google Sheets' })
+    const message = error.message === 'fetch failed'
+      ? `Network request failed (${error.cause?.code || error.cause?.message || 'unknown'}). Check SUPABASE_URL and internet access on the server.`
+      : error.message
+    return res.status(500).json({ error: message || 'Failed to sync from Google Sheets' })
   }
 })
 

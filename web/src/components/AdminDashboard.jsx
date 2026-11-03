@@ -322,12 +322,12 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     product_id: '',
     quantity: 1,
     next_ship_date: '',
-    frequency_days: 30,
+    frequency_days: 80,
     auto_ship_enabled: false
   })
   const [showEditClientProductModal, setShowEditClientProductModal] = useState(false)
   const [editingClientProduct, setEditingClientProduct] = useState(null)
-  const [editClientProductForm, setEditClientProductForm] = useState({ quantity: 1, next_ship_date: '', auto_ship_enabled: false })
+  const [editClientProductForm, setEditClientProductForm] = useState({ quantity: 1, frequency_days: 80, next_ship_date: '', auto_ship_enabled: false })
   const [shippingScheduleItems, setShippingScheduleItems] = useState([])
   const [clientOrderHistory, setClientOrderHistory] = useState([])
   const [showOrderHistory, setShowOrderHistory] = useState(false)
@@ -4244,6 +4244,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                                     setEditingClientProduct(cp)
                                     setEditClientProductForm({
                                       quantity: cp.quantity,
+                                      frequency_days: cp.frequency_days ?? 80,
                                       next_ship_date: cp.next_ship_date || '',
                                       auto_ship_enabled: cp.auto_ship_enabled !== false
                                     })
@@ -8588,7 +8589,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                     lead_id: assignProductClient.id,
                     product_id: assignProductForm.product_id,
                     quantity: parseInt(assignProductForm.quantity),
-                    frequency_days: parseInt(assignProductForm.frequency_days) || 30,
+                    frequency_days: parseInt(assignProductForm.frequency_days) || 80,
                     next_ship_date: assignProductForm.next_ship_date || null,
                     auto_ship_enabled: false
                   }])
@@ -8598,7 +8599,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                 await fetchAllClientProducts()
                 await fetchShippingSchedule()
                 setShowAssignProductModal(false)
-                setAssignProductForm({ product_id: '', quantity: 1, next_ship_date: '', frequency_days: 30, auto_ship_enabled: false })
+                setAssignProductForm({ product_id: '', quantity: 1, next_ship_date: '', frequency_days: 80, auto_ship_enabled: false })
                 alert('Product assigned successfully!')
               } catch (error) {
                 console.error('Error assigning product:', error)
@@ -8633,6 +8634,18 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                 />
               </div>
               <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Frequency (days) *</label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={assignProductForm.frequency_days}
+                  onChange={(e) => setAssignProductForm({ ...assignProductForm, frequency_days: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">First Ship Date <span className="text-gray-400 font-normal">(optional — set later)</span></label>
                 <input
                   type="date"
@@ -8649,7 +8662,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   onClick={() => {
                     setShowAssignProductModal(false)
                     setAssignProductClient(null)
-                    setAssignProductForm({ product_id: '', quantity: 1, next_ship_date: '', frequency_days: 30, auto_ship_enabled: false })
+                    setAssignProductForm({ product_id: '', quantity: 1, next_ship_date: '', frequency_days: 80, auto_ship_enabled: false })
                   }}
                   className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
                 >
@@ -8684,6 +8697,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   .from('client_products')
                   .update({
                     quantity: parseInt(editClientProductForm.quantity),
+                    frequency_days: parseInt(editClientProductForm.frequency_days) || 80,
                     next_ship_date: updatedShipDate
                   })
                   .eq('id', editingClientProduct.id)
@@ -8768,6 +8782,18 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   min="1"
                   value={editClientProductForm.quantity}
                   onChange={(e) => setEditClientProductForm({ ...editClientProductForm, quantity: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Frequency (days)</label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={editClientProductForm.frequency_days}
+                  onChange={(e) => setEditClientProductForm({ ...editClientProductForm, frequency_days: e.target.value })}
                   required
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />

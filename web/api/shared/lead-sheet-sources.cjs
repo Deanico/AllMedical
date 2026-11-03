@@ -45,6 +45,23 @@ const getLeadSourceCreatedAt = (row, createdAtColumn = 1) => {
   return Number.isNaN(timestamp.getTime()) ? null : timestamp.toISOString()
 }
 
+const getExistingLeads = async (supabase, emails) => {
+  const uniqueEmails = [...new Set(emails.map((email) => String(email).toLowerCase()))]
+  const leads = []
+
+  for (let index = 0; index < uniqueEmails.length; index += 100) {
+    const { data, error } = await supabase
+      .from('leads')
+      .select('email, lead_source_created_at')
+      .in('email', uniqueEmails.slice(index, index + 100))
+
+    if (error) throw error
+    leads.push(...(data || []))
+  }
+
+  return leads
+}
+
 const updateExistingLeads = async (supabase, candidates, existingLeads) => {
   const existingByEmail = new Map(
     (existingLeads || []).map((lead) => [String(lead.email || '').toLowerCase(), lead])
@@ -82,4 +99,10 @@ const updateExistingLeads = async (supabase, candidates, existingLeads) => {
   }
 }
 
-module.exports = { getLeadHandling, getLeadSheetSources, getLeadSourceCreatedAt, updateExistingLeads }
+module.exports = {
+  getExistingLeads,
+  getLeadHandling,
+  getLeadSheetSources,
+  getLeadSourceCreatedAt,
+  updateExistingLeads
+}
