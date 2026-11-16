@@ -12,6 +12,7 @@ CREATE TABLE leads (
   phone TEXT NOT NULL,
   insurance TEXT NOT NULL,
   notes TEXT,
+  handling TEXT NOT NULL DEFAULT 'call' CHECK (handling IN ('ai', 'call', 'ai_call')),
   stage TEXT DEFAULT 'new' CHECK (stage IN ('new', 'called', 'reached', 'unqualified', 'qualified')),
   qualified_at TIMESTAMP WITH TIME ZONE,
   product_needed TEXT,

@@ -19,6 +19,11 @@ const FILTERS = [
 ]
 
 const handlingBadge = (c) => {
+  if (c.handling === 'ai_call') {
+    return c.tookOver
+      ? { text: 'A.I / Call - Took over', className: 'bg-indigo-100 text-indigo-800' }
+      : { text: 'A.I / Call', className: 'bg-cyan-100 text-cyan-800' }
+  }
   if (c.handling === 'ai') {
     return c.tookOver
       ? { text: 'AI - Took over', className: 'bg-indigo-100 text-indigo-800' }
@@ -193,6 +198,7 @@ export default function AllMessagesPanel() {
         })}
       </div>
 
+      {error && (
         <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
       )}
 

@@ -5,6 +5,7 @@ const {
   getLeadSheetSources,
   getLeadSourceCreatedAt,
   getExistingLeads,
+  markCombinedCampaignCandidates,
   updateExistingLeads
 } = require('../shared/lead-sheet-sources.cjs');
 
@@ -124,6 +125,8 @@ module.exports = async function (context, req) {
         lead_source_created_at: leadSourceCreatedAt
       });
     }
+
+    markCombinedCampaignCandidates(candidates);
 
     if (candidates.length === 0) {
       context.res = {

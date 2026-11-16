@@ -106,6 +106,24 @@ Cross-check:
 - `sum(Expenses where entry_type='shipment')` equals Shipment Cost card
 - `Net Profit = Revenue - Expenses - Shipment Cost`
 
+The dashboard's Monthly Revenue is the current calendar month's revenue from the
+Reports monthly P&L (paid claims), not the insurance calculator's estimated profit.
+It reflects the most recently synced financial data. As in Reports, a claim with
+no paid date is assigned to its sync month.
+
+## Client growth on the dashboard
+
+Run `web/add-client-growth-history.sql` in the Supabase SQL Editor. The dashboard
+shows the last six calendar months of net client changes: qualifying a lead adds
+one, while changing a qualified lead to another stage or deleting it subtracts
+one. Pausing a client does not change qualification. Months follow the viewer's
+local time.
+
+The migration backfills currently qualified leads only when `qualified_at` is
+known. Past removals, earlier qualification cycles, deleted leads, and missing
+qualification dates cannot be recovered from existing records, so older months
+may be incomplete. Future changes are recorded automatically.
+
 ## Column assumptions used by current sync code
 
 Paid Claims rows require:

@@ -45,6 +45,33 @@ const getLeadSourceCreatedAt = (row, createdAtColumn = 1) => {
   return Number.isNaN(timestamp.getTime()) ? null : timestamp.toISOString()
 }
 
+const getLeadIdentity = (lead) => {
+  const name = String(lead.name || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+  const phone = String(lead.phone || '').replace(/\D/g, '').slice(-10)
+  return name && phone ? `${name}:${phone}` : null
+}
+
+const markCombinedCampaignCandidates = (candidates) => {
+  const handlingByIdentity = new Map()
+
+  for (const candidate of candidates) {
+    const identity = getLeadIdentity(candidate)
+    if (!identity) continue
+
+    const handlings = handlingByIdentity.get(identity) || new Set()
+    handlings.add(candidate.handling)
+    handlingByIdentity.set(identity, handlings)
+  }
+
+  for (const candidate of candidates) {
+    const identity = getLeadIdentity(candidate)
+    const handlings = identity && handlingByIdentity.get(identity)
+    if (handlings?.has('ai') && handlings.has('call')) {
+      candidate.handling = 'ai_call'
+    }
+  }
+}
+
 const getExistingLeads = async (supabase, emails) => {
   const uniqueEmails = [...new Set(emails.map((email) => String(email).toLowerCase()))]
   const leads = []
@@ -52,7 +79,7 @@ const getExistingLeads = async (supabase, emails) => {
   for (let index = 0; index < uniqueEmails.length; index += 100) {
     const { data, error } = await supabase
       .from('leads')
-      .select('email, lead_source_created_at')
+      .select('email, handling, lead_source_created_at')
       .in('email', uniqueEmails.slice(index, index + 100))
 
     if (error) throw error
@@ -63,26 +90,52 @@ const getExistingLeads = async (supabase, emails) => {
 }
 
 const updateExistingLeads = async (supabase, candidates, existingLeads) => {
-  const existingByEmail = new Map(
-    (existingLeads || []).map((lead) => [String(lead.email || '').toLowerCase(), lead])
-  )
+  const existingByEmail = new Map()
+  for (const lead of existingLeads || []) {
+    const email = String(lead.email || '').toLowerCase()
+    const leads = existingByEmail.get(email) || []
+    leads.push(lead)
+    existingByEmail.set(email, leads)
+  }
+
+  const candidatesByEmail = new Map()
+  for (const candidate of candidates) {
+    const email = String(candidate.email || '').toLowerCase()
+    const handlings = candidatesByEmail.get(email) || new Set()
+    handlings.add(candidate.handling)
+    candidatesByEmail.set(email, handlings)
+  }
+
   const updatesByEmail = new Map()
 
   for (const candidate of candidates) {
-    const existing = existingByEmail.get(candidate.email)
+    const email = String(candidate.email || '').toLowerCase()
+    const existing = existingByEmail.get(email)
     if (!existing) continue
 
-    const update = updatesByEmail.get(candidate.email) || {}
-    if (candidate.handling === 'ai') update.handling = 'ai'
+    const update = updatesByEmail.get(email) || {}
+    const handlings = candidatesByEmail.get(email)
+    const existingHandlings = new Set(existing.map((lead) => lead.handling))
     if (
-      !existing.lead_source_created_at &&
+      handlings.has('ai_call') ||
+      (handlings.has('ai') && handlings.has('call')) ||
+      existingHandlings.has('ai_call') ||
+      (existingHandlings.has('ai') && existingHandlings.has('call'))
+    ) {
+      update.handling = 'ai_call'
+    } else if (handlings.has('ai')) {
+      update.handling = 'ai'
+    }
+    const existingLead = existing[0]
+    if (
+      !existingLead.lead_source_created_at &&
       candidate.lead_source_created_at &&
       (!update.lead_source_created_at ||
         new Date(candidate.lead_source_created_at) < new Date(update.lead_source_created_at))
     ) {
       update.lead_source_created_at = candidate.lead_source_created_at
     }
-    if (Object.keys(update).length) updatesByEmail.set(candidate.email, update)
+    if (Object.keys(update).length) updatesByEmail.set(email, update)
   }
 
   const updates = [...updatesByEmail.entries()]
@@ -101,6 +154,7 @@ const updateExistingLeads = async (supabase, candidates, existingLeads) => {
 
 module.exports = {
   getExistingLeads,
+  markCombinedCampaignCandidates,
   getLeadHandling,
   getLeadSheetSources,
   getLeadSourceCreatedAt,

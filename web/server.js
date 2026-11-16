@@ -14,6 +14,7 @@ const {
   getLeadSheetSources,
   getLeadSourceCreatedAt,
   getExistingLeads,
+  markCombinedCampaignCandidates,
   updateExistingLeads
 } = leadSheetSources
 
@@ -266,6 +267,8 @@ app.post('/api/sync-google-sheets', async (req, res) => {
         lead_source_created_at: leadSourceCreatedAt
       })
     }
+
+    markCombinedCampaignCandidates(candidates)
 
     if (candidates.length === 0) {
       return res.status(200).json({

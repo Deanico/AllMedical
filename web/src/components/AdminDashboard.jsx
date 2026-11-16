@@ -10,6 +10,7 @@ import { generateTreatmentRecords, getTreatmentRecordSupplierLabel } from '../li
 import { generateHardshipForm } from '../lib/generateHardshipForm'
 import { calculateInsuranceProjection } from '../lib/insuranceProjection'
 import { getPortalRedirectUrl } from '../lib/portalUrls'
+import { calculateClientGrowth, getGrowthStart, getMonthKey } from '../lib/dashboardMetrics'
 
 const parseDateInput = (value) => {
   if (!value) return null
@@ -55,6 +56,12 @@ const formatShortDate = (value, fallback = 'N/A') => {
   if (!date) return fallback
   return date.toLocaleDateString('en-US')
 }
+
+const LEAD_HANDLING_OPTIONS = [
+  { value: 'call', label: 'Call', className: 'bg-green-100 text-green-800' },
+  { value: 'ai', label: 'AI', className: 'bg-purple-100 text-purple-800' },
+  { value: 'ai_call', label: 'A.I / Call', className: 'bg-cyan-100 text-cyan-800' }
+]
 
 const getDateTimeValue = (value, fallback = 0) => {
   const date = parseDateInput(value)
@@ -238,6 +245,10 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const [financialPnlTotals, setFinancialPnlTotals] = useState(null)
   const [financialPnlMonthly, setFinancialPnlMonthly] = useState([])
   const [financialLastSyncedAt, setFinancialLastSyncedAt] = useState(null)
+  const [monthlyRevenue, setMonthlyRevenue] = useState(null)
+  const [financialReportError, setFinancialReportError] = useState(null)
+  const [clientGrowthEvents, setClientGrowthEvents] = useState(null)
+  const [clientGrowthError, setClientGrowthError] = useState(null)
   const [portalInviteSending, setPortalInviteSending] = useState(false)
   const [portalInviteMessage, setPortalInviteMessage] = useState(null)
   const [showPortalPreview, setShowPortalPreview] = useState(false)
@@ -279,7 +290,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     city: '', 
     state: '', 
     zip_code: '',
-    is_paused: false 
+    is_paused: false,
+    handling: 'call'
   })
   const [selectedCalcClient, setSelectedCalcClient] = useState(null)
   const [editingCalculator, setEditingCalculator] = useState(false)
@@ -741,14 +753,14 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     fetchProjects()
     fetchTasks()
     fetchExpenses()
-    fetchFinancialReportsData()
     fetchCustomDataTables()
   }, [])
 
   useEffect(() => {
-    if (activeView === 'reports') {
+    if (activeView === 'dashboard' || activeView === 'reports') {
       fetchFinancialReportsData()
     }
+    if (activeView === 'dashboard') fetchClientGrowth()
   }, [activeView])
 
   useEffect(() => {
@@ -1149,15 +1161,50 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     }
   }
 
+  const fetchClientGrowth = async () => {
+    if (!supabase) return
+    try {
+      const now = new Date()
+      const start = getGrowthStart(now)
+      const end = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+      const events = []
+      const pageSize = 500
+      let page = 0
+      let data
+      do {
+        const response = await supabase
+          .from('client_growth_events')
+          .select('id, occurred_at, change')
+          .gte('occurred_at', start.toISOString())
+          .lt('occurred_at', end.toISOString())
+          .order('occurred_at', { ascending: true })
+          .order('id', { ascending: true })
+          .range(page * pageSize, (page + 1) * pageSize - 1)
+        if (response.error) throw response.error
+        data = response.data
+        events.push(...data)
+        page += 1
+      } while (data.length === pageSize)
+      setClientGrowthEvents(events)
+      setClientGrowthError(null)
+    } catch (error) {
+      console.error('Error fetching client growth:', error)
+      setClientGrowthEvents(null)
+      setClientGrowthError('Client growth unavailable. Check that the client growth history migration has been run.')
+    }
+  }
+
   const fetchFinancialReportsData = async () => {
     if (!supabase) return
 
     try {
+      const month = getMonthKey(new Date())
       const [
         claimsResponse,
         opsResponse,
         pnlTotalsResponse,
         pnlMonthlyResponse,
+        currentMonthResponse,
         syncJobsResponse
       ] = await Promise.all([
         supabase
@@ -1181,9 +1228,15 @@ export default function AdminDashboard({ userEmail, onLogout }) {
           .order('month', { ascending: false })
           .limit(24),
         supabase
+          .from('v_profit_loss_monthly')
+          .select('revenue')
+          .eq('month', month)
+          .maybeSingle(),
+        supabase
           .from('sheet_sync_jobs')
           .select('created_at, status, claims_rows_upserted, ops_rows_upserted, error_message')
           .eq('sync_type', 'financial_sheets')
+          .eq('status', 'success')
           .order('created_at', { ascending: false })
           .limit(1)
       ])
@@ -1196,15 +1249,20 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       }
 
       if (pnlMonthlyResponse.error) throw pnlMonthlyResponse.error
+      if (currentMonthResponse.error) throw currentMonthResponse.error
       if (syncJobsResponse.error) throw syncJobsResponse.error
 
       setFinancialClaimsRows(claimsResponse.data || [])
       setFinancialOpsRows(opsResponse.data || [])
       setFinancialPnlTotals(pnlTotalsResponse.data || null)
       setFinancialPnlMonthly(pnlMonthlyResponse.data || [])
+      setMonthlyRevenue({ month, value: currentMonthResponse.data?.revenue ?? 0 })
       setFinancialLastSyncedAt(syncJobsResponse.data?.[0]?.created_at || null)
+      setFinancialReportError(null)
     } catch (error) {
       console.error('Error fetching financial report data:', error)
+      setMonthlyRevenue(null)
+      setFinancialReportError('Financial report data is unavailable.')
     }
   }
 
@@ -1579,10 +1637,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
     try {
       const updates = { stage: newStage }
-      if (newStage === 'qualified') {
-        updates.qualified_at = new Date().toISOString()
-      }
-
+      if (newStage === 'qualified') updates.qualified_at = new Date().toISOString()
       const { error } = await supabase
         .from('leads')
         .update(updates)
@@ -1590,8 +1645,36 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
       if (error) throw error
       await fetchLeads()
+      await fetchClientGrowth()
     } catch (error) {
       console.error('Error updating stage:', error)
+      alert('Failed to update stage: ' + (error?.message || 'Unknown error'))
+    } finally {
+      setUpdating(false)
+    }
+  }
+
+  const updateLeadHandling = async (leadId, handling) => {
+    if (!supabase) return
+    setUpdating(true)
+
+    try {
+      const { error } = await supabase
+        .from('leads')
+        .update({ handling })
+        .eq('id', leadId)
+
+      if (error) throw error
+
+      setLeads(prevLeads => prevLeads.map(lead => (
+        lead.id === leadId ? { ...lead, handling } : lead
+      )))
+      setSelectedClient(prevClient => (
+        prevClient?.id === leadId ? { ...prevClient, handling } : prevClient
+      ))
+    } catch (error) {
+      console.error('Error updating lead handling:', error)
+      alert('Failed to update lead handling: ' + (error?.message || 'Unknown error'))
     } finally {
       setUpdating(false)
     }
@@ -1847,7 +1930,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       // Format birthday to include time at noon UTC to prevent timezone shift issues
       const birthdayValue = addLeadForm.birthday ? `${addLeadForm.birthday}T12:00:00` : null;
       
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('leads')
         .insert([{
           name: addLeadForm.name,
@@ -1860,9 +1943,9 @@ export default function AdminDashboard({ userEmail, onLogout }) {
           state: addLeadForm.state || null,
           zip_code: addLeadForm.zip_code || null,
           is_paused: Boolean(addLeadForm.is_paused),
+          handling: addLeadForm.handling,
           stage: 'new'
         }])
-        .select()
 
       if (error) throw error
 
@@ -1880,7 +1963,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
         city: '', 
         state: '', 
         zip_code: '',
-        is_paused: false 
+        is_paused: false,
+        handling: 'call'
       })
       setShowAddLeadModal(false)
       
@@ -3232,32 +3316,18 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Monthly Revenue</p>
                       <p className="text-3xl font-extrabold text-slate-900 mt-2">
-                        ${(() => {
-                          const totalYearlyNetProfit = activeQualifiedLeads.reduce((total, client) => {
-                            if (!client.calc_deductible || !client.calc_insurance_paid || !client.calc_percent_allowable || !client.calc_product_cost) {
-                              return total
-                            }
-
-                            const { netYearlyProfit } = calculateInsuranceProjection({
-                              deductible: parseFloat(client.calc_deductible) || 0,
-                              oopMax: parseFloat(client.calc_oop_max) || 0,
-                              percentOfAllowable: parseFloat(client.calc_percent_allowable) || 0,
-                              allowableAmount: parseFloat(client.calc_insurance_paid) || 0,
-                              costOfProduct: parseFloat(client.calc_product_cost) || 0
-                            })
-
-                            return total + netYearlyProfit
-                          }, 0)
-
-                          return (totalYearlyNetProfit / 12).toFixed(2)
-                        })()}
+                        {financialReportError ? 'Unavailable' : monthlyRevenue?.month === getMonthKey(new Date())
+                          ? formatCurrency(monthlyRevenue.value)
+                          : 'Loading...'}
                       </p>
                     </div>
                     <div className="h-12 w-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center">
                       <DashboardIcon name="billing" className="h-6 w-6" />
                     </div>
                   </div>
-                  <p className="text-sm text-slate-500 mt-4">Estimated insurance revenue</p>
+                  <p className="text-sm text-slate-500 mt-4">
+                    {financialReportError || `Current month paid claims from Reports. Last sync: ${financialLastSyncedAt ? formatDisplayDate(financialLastSyncedAt) : 'Not synced yet'}`}
+                  </p>
                 </div>
 
                 {/* Items Due Today */}
@@ -3285,28 +3355,24 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                 {/* Client Growth */}
                 <div className="bg-white rounded-lg shadow p-6">
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">Client Growth</h3>
+                  <p className="text-sm text-gray-500 mb-4">Net qualifications and removals by month. Earlier history may be incomplete.</p>
                   <div className="space-y-3">
-                    {(() => {
-                      // Client growth by month - counts when leads were converted to qualified status
-                      const clientGrowthData = [
-                        { month: 'Oct', clients: 0 },
-                        { month: 'Nov', clients: 0 },
-                        { month: 'Dec', clients: 0 },
-                        { month: 'Jan', clients: 4 },
-                        { month: 'Feb', clients: 10 },
-                        { month: 'Mar', clients: 10 }
-                      ]
-                      
-                      const maxClients = Math.max(...clientGrowthData.map(d => d.clients), 1)
+                    {clientGrowthError ? (
+                      <p className="text-sm text-red-700">{clientGrowthError}</p>
+                    ) : !clientGrowthEvents ? (
+                      <p className="text-sm text-gray-500">Loading client growth...</p>
+                    ) : (() => {
+                      const clientGrowthData = calculateClientGrowth(clientGrowthEvents)
+                      const maxClients = Math.max(...clientGrowthData.map(d => Math.abs(d.clients)), 1)
                       
                       return clientGrowthData.map((data) => {
-                        const percentage = (data.clients / maxClients) * 100
+                        const percentage = (Math.abs(data.clients) / maxClients) * 100
                         return (
                           <div key={data.month} className="flex items-center gap-3">
-                            <div className="w-12 text-sm text-gray-600">{data.month}</div>
+                            <div className="w-20 text-sm text-gray-600">{data.label}</div>
                             <div className="flex-1 bg-gray-200 rounded-full h-3">
                               <div 
-                                className="bg-blue-600 rounded-full h-3" 
+                                className={`${data.clients < 0 ? 'bg-red-600' : 'bg-blue-600'} rounded-full h-3`}
                                 style={{ width: `${percentage}%` }}
                               ></div>
                             </div>
@@ -3480,48 +3546,57 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                       </td>
                     </tr>
                   ) : (
-                    orderedLeads.map((lead) => (
-                      <tr key={lead.id} className="hover:bg-gray-50">
-                        <td className="px-3 py-3 text-sm font-medium text-gray-900 truncate">
-                          <button
-                            type="button"
-                            onClick={() => openEditModal(lead)}
-                            className="text-left hover:text-blue-700 hover:underline focus:outline-none focus:underline"
-                            title={`Edit ${lead.stage === 'qualified' ? 'client' : 'lead'} information`}
-                          >
-                            {lead.name}
-                          </button>
-                          {lead.handling && (
-                            <span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-medium ${lead.handling === 'ai' ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'}`}>
-                              {lead.handling === 'ai' ? 'AI' : 'Call'}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-3 py-3 text-sm text-gray-600 truncate">
-                          {lead.phone}
-                        </td>
-                        <td className="px-3 py-3 text-sm text-gray-600 truncate">
-                          {lead.email}
-                        </td>
-                        <td className="px-3 py-3 text-sm text-gray-600 truncate">
-                          {lead.insurance}
-                        </td>
-                        <td className="px-3 py-3 text-sm">
-                          <select
-                            value={lead.stage}
-                            onChange={(e) => updateStage(lead.id, e.target.value)}
-                            disabled={updating}
-                            className={`w-full px-2 py-1 rounded-full text-xs font-semibold ${getStageColor(lead.stage)} border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500`}
-                          >
-                            <option value="new">New</option>
-                            <option value="called">Called</option>
-                            <option value="reached">Reached</option>
-                            <option value="unqualified">Unqualified</option>
-                            <option value="qualified">Qualified</option>
-                          </select>
-                        </td>
-                      </tr>
-                    ))
+                    orderedLeads.map((lead) => {
+                      const handlingOption = LEAD_HANDLING_OPTIONS.find((option) => option.value === lead.handling) || LEAD_HANDLING_OPTIONS[0]
+                      return (
+                        <tr key={lead.id} className="hover:bg-gray-50">
+                          <td className="px-3 py-3 text-sm font-medium text-gray-900 truncate">
+                            <button
+                              type="button"
+                              onClick={() => openEditModal(lead)}
+                              className="text-left hover:text-blue-700 hover:underline focus:outline-none focus:underline"
+                              title={`Edit ${lead.stage === 'qualified' ? 'client' : 'lead'} information`}
+                            >
+                              {lead.name}
+                            </button>
+                            <select
+                              aria-label={`Campaign handling for ${lead.name}`}
+                              value={lead.handling || 'call'}
+                              onChange={(e) => updateLeadHandling(lead.id, e.target.value)}
+                              disabled={updating}
+                              className={`ml-2 rounded-full px-2 py-0.5 text-xs font-medium ${handlingOption.className} border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                            >
+                              {LEAD_HANDLING_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="px-3 py-3 text-sm text-gray-600 truncate">
+                            {lead.phone}
+                          </td>
+                          <td className="px-3 py-3 text-sm text-gray-600 truncate">
+                            {lead.email}
+                          </td>
+                          <td className="px-3 py-3 text-sm text-gray-600 truncate">
+                            {lead.insurance}
+                          </td>
+                          <td className="px-3 py-3 text-sm">
+                            <select
+                              value={lead.stage}
+                              onChange={(e) => updateStage(lead.id, e.target.value)}
+                              disabled={updating}
+                              className={`w-full px-2 py-1 rounded-full text-xs font-semibold ${getStageColor(lead.stage)} border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                            >
+                              <option value="new">New</option>
+                              <option value="called">Called</option>
+                              <option value="reached">Reached</option>
+                              <option value="unqualified">Unqualified</option>
+                              <option value="qualified">Qualified</option>
+                            </select>
+                          </td>
+                        </tr>
+                      )
+                    })
                   )}
                 </tbody>
               </table>
@@ -3538,14 +3613,27 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   <div key={lead.id} className="p-4 hover:bg-gray-50">
                     <div className="space-y-3">
                       <div className="flex justify-between items-start">
-                        <button
-                          type="button"
-                          onClick={() => openEditModal(lead)}
-                          className="font-semibold text-gray-900 text-base text-left hover:text-blue-700 hover:underline focus:outline-none focus:underline"
-                          title={`Edit ${lead.stage === 'qualified' ? 'client' : 'lead'} information`}
-                        >
-                          {lead.name}
-                        </button>
+                        <div className="flex flex-col items-start gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(lead)}
+                            className="font-semibold text-gray-900 text-base text-left hover:text-blue-700 hover:underline focus:outline-none focus:underline"
+                            title={`Edit ${lead.stage === 'qualified' ? 'client' : 'lead'} information`}
+                          >
+                            {lead.name}
+                          </button>
+                          <select
+                            aria-label={`Campaign handling for ${lead.name}`}
+                            value={lead.handling || 'call'}
+                            onChange={(e) => updateLeadHandling(lead.id, e.target.value)}
+                            disabled={updating}
+                            className={`px-2 py-1 rounded-full text-xs font-medium ${LEAD_HANDLING_OPTIONS.find((option) => option.value === lead.handling)?.className || LEAD_HANDLING_OPTIONS[0].className} border-0 cursor-pointer`}
+                          >
+                            {LEAD_HANDLING_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        </div>
                         <select
                           value={lead.stage}
                           onChange={(e) => updateStage(lead.id, e.target.value)}
@@ -5656,6 +5744,9 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
           return (
             <div className="space-y-4 sm:space-y-6">
+              {financialReportError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">{financialReportError}</div>
+              )}
               <div className="bg-white rounded-lg shadow p-4 sm:p-6">
                 <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-6">
                   <div>
@@ -7584,6 +7675,21 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="Blue Cross"
                 />
+              </div>
+              <div>
+                <label htmlFor="add-lead-handling" className="block text-sm font-medium text-gray-700 mb-1">
+                  Campaign
+                </label>
+                <select
+                  id="add-lead-handling"
+                  value={addLeadForm.handling}
+                  onChange={(e) => setAddLeadForm({ ...addLeadForm, handling: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {LEAD_HANDLING_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
