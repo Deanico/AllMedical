@@ -268,8 +268,6 @@ app.post('/api/sync-google-sheets', async (req, res) => {
       })
     }
 
-    markCombinedCampaignCandidates(candidates)
-
     if (candidates.length === 0) {
       return res.status(200).json({
         added: 0,
@@ -282,11 +280,12 @@ app.post('/api/sync-google-sheets', async (req, res) => {
       })
     }
 
-    const existingLeads = await getExistingLeads(supabase, candidates.map(candidate => candidate.email))
+    const existingLeads = await getExistingLeads(supabase)
+    const combinedIdentities = markCombinedCampaignCandidates(candidates, existingLeads)
 
     const existingEmailSet = new Set((existingLeads || []).map(lead => String(lead.email || '').toLowerCase()))
 
-    await updateExistingLeads(supabase, candidates, existingLeads)
+    await updateExistingLeads(supabase, candidates, existingLeads, combinedIdentities)
 
     let added = 0
     for (const candidate of candidates) {

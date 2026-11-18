@@ -6,6 +6,13 @@ export function getGrowthStart(now = new Date(), months = 6) {
   return new Date(now.getFullYear(), now.getMonth() - months + 1, 1)
 }
 
+export function getNewClientGrowthEvents(events, month) {
+  return events.filter(event => {
+    const date = new Date(event.occurred_at)
+    return event.change === 1 && !Number.isNaN(date.getTime()) && getMonthKey(date) === month
+  })
+}
+
 export function calculateClientGrowth(events, now = new Date(), months = 6) {
   const start = getGrowthStart(now, months)
   const result = Array.from({ length: months }, (_, index) => {

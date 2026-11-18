@@ -1,5 +1,14 @@
 # React + Vite
 
+## Google Sheets lead campaigns
+
+Lead sync marks matching A.I and Call leads as A.I / Call. Matches require the
+same normalized name and the same last 10 phone digits; existing matching leads
+are updated even when their email addresses differ. Repeated email addresses
+are still skipped rather than imported as duplicate records. The
+`add-ai-call-lead-handling.sql` migration must be applied before using the
+combined campaign value.
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:

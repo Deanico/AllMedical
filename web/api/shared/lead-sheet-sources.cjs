@@ -48,106 +48,88 @@ const getLeadSourceCreatedAt = (row, createdAtColumn = 1) => {
 const getLeadIdentity = (lead) => {
   const name = String(lead.name || '').toLowerCase().replace(/[^a-z0-9]/g, '')
   const phone = String(lead.phone || '').replace(/\D/g, '').slice(-10)
-  return name && phone ? `${name}:${phone}` : null
+  return name && phone.length === 10 ? `${name}:${phone}` : null
 }
 
-const markCombinedCampaignCandidates = (candidates) => {
+const markCombinedCampaignCandidates = (candidates, existingLeads = []) => {
   const handlingByIdentity = new Map()
 
-  for (const candidate of candidates) {
-    const identity = getLeadIdentity(candidate)
+  for (const lead of [...candidates, ...existingLeads]) {
+    const identity = getLeadIdentity(lead)
     if (!identity) continue
 
     const handlings = handlingByIdentity.get(identity) || new Set()
-    handlings.add(candidate.handling)
+    handlings.add(lead.handling)
     handlingByIdentity.set(identity, handlings)
   }
 
+  const combinedIdentities = new Set()
   for (const candidate of candidates) {
     const identity = getLeadIdentity(candidate)
     const handlings = identity && handlingByIdentity.get(identity)
-    if (handlings?.has('ai') && handlings.has('call')) {
+    if (handlings && (handlings.has('ai_call') || (handlings.has('ai') && handlings.has('call')))) {
       candidate.handling = 'ai_call'
+      combinedIdentities.add(identity)
     }
   }
+  return combinedIdentities
 }
 
-const getExistingLeads = async (supabase, emails) => {
-  const uniqueEmails = [...new Set(emails.map((email) => String(email).toLowerCase()))]
+const getExistingLeads = async (supabase) => {
   const leads = []
+  const pageSize = 500
 
-  for (let index = 0; index < uniqueEmails.length; index += 100) {
+  for (let index = 0; ; index += pageSize) {
     const { data, error } = await supabase
       .from('leads')
-      .select('email, handling, lead_source_created_at')
-      .in('email', uniqueEmails.slice(index, index + 100))
+      .select('id, name, phone, email, handling, lead_source_created_at')
+      .order('id')
+      .range(index, index + pageSize - 1)
 
     if (error) throw error
     leads.push(...(data || []))
+    if (!data || data.length < pageSize) break
   }
 
   return leads
 }
 
-const updateExistingLeads = async (supabase, candidates, existingLeads) => {
-  const existingByEmail = new Map()
-  for (const lead of existingLeads || []) {
-    const email = String(lead.email || '').toLowerCase()
-    const leads = existingByEmail.get(email) || []
-    leads.push(lead)
-    existingByEmail.set(email, leads)
-  }
-
+const updateExistingLeads = async (supabase, candidates, existingLeads, combinedIdentities) => {
   const candidatesByEmail = new Map()
   for (const candidate of candidates) {
     const email = String(candidate.email || '').toLowerCase()
-    const handlings = candidatesByEmail.get(email) || new Set()
-    handlings.add(candidate.handling)
-    candidatesByEmail.set(email, handlings)
+    const matches = candidatesByEmail.get(email) || []
+    matches.push(candidate)
+    candidatesByEmail.set(email, matches)
   }
 
-  const updatesByEmail = new Map()
-
-  for (const candidate of candidates) {
-    const email = String(candidate.email || '').toLowerCase()
-    const existing = existingByEmail.get(email)
-    if (!existing) continue
-
-    const update = updatesByEmail.get(email) || {}
-    const handlings = candidatesByEmail.get(email)
-    const existingHandlings = new Set(existing.map((lead) => lead.handling))
-    if (
-      handlings.has('ai_call') ||
-      (handlings.has('ai') && handlings.has('call')) ||
-      existingHandlings.has('ai_call') ||
-      (existingHandlings.has('ai') && existingHandlings.has('call'))
-    ) {
+  const updates = []
+  for (const lead of existingLeads) {
+    const update = {}
+    if (lead.handling !== 'ai_call' && combinedIdentities.has(getLeadIdentity(lead))) {
       update.handling = 'ai_call'
-    } else if (handlings.has('ai')) {
-      update.handling = 'ai'
     }
-    const existingLead = existing[0]
-    if (
-      !existingLead.lead_source_created_at &&
-      candidate.lead_source_created_at &&
-      (!update.lead_source_created_at ||
-        new Date(candidate.lead_source_created_at) < new Date(update.lead_source_created_at))
-    ) {
-      update.lead_source_created_at = candidate.lead_source_created_at
+    if (!lead.lead_source_created_at) {
+      for (const candidate of candidatesByEmail.get(String(lead.email || '').toLowerCase()) || []) {
+        if (candidate.lead_source_created_at &&
+          (!update.lead_source_created_at ||
+            new Date(candidate.lead_source_created_at) < new Date(update.lead_source_created_at))) {
+          update.lead_source_created_at = candidate.lead_source_created_at
+        }
+      }
     }
-    if (Object.keys(update).length) updatesByEmail.set(email, update)
+    if (Object.keys(update).length) updates.push([lead.id, update])
   }
 
-  const updates = [...updatesByEmail.entries()]
   for (let index = 0; index < updates.length; index += 25) {
-    const results = await Promise.all(updates.slice(index, index + 25).map(async ([email, update]) => {
-      const { error } = await supabase.from('leads').update(update).eq('email', email)
-      return { email, error }
+    const results = await Promise.all(updates.slice(index, index + 25).map(async ([id, update]) => {
+      const { error } = await supabase.from('leads').update(update).eq('id', id)
+      return { id, error }
     }))
 
     const failedUpdate = results.find((result) => result.error)
     if (failedUpdate) {
-      throw new Error(`Failed to update existing lead ${failedUpdate.email}: ${failedUpdate.error.message}`)
+      throw new Error(`Failed to update existing lead ${failedUpdate.id}: ${failedUpdate.error.message}`)
     }
   }
 }

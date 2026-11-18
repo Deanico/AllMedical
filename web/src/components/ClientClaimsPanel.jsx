@@ -13,6 +13,7 @@ const STATUS_META = {
 const EMPTY_FORM = {
   claim_number: '',
   date_of_service: '',
+  paid_date: '',
   record_type: 'claim',
   billed_amount: '',
   allowed_amount: '',
@@ -35,7 +36,7 @@ const formatDate = (value) => {
   return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
-export default function ClientClaimsPanel({ client }) {
+export default function ClientClaimsPanel({ client, onClaimsChanged }) {
   const [claims, setClaims] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -87,6 +88,7 @@ export default function ClientClaimsPanel({ client }) {
     setForm({
       claim_number: claim.claim_number || '',
       date_of_service: claim.date_of_service || '',
+      paid_date: claim.paid_date || '',
       record_type: claim.record_type || 'claim',
       billed_amount: claim.billed_amount ?? '',
       allowed_amount: claim.allowed_amount ?? '',
@@ -142,6 +144,7 @@ export default function ClientClaimsPanel({ client }) {
         lead_id: client.id,
         claim_number: form.claim_number.trim() || null,
         date_of_service: form.date_of_service || null,
+        paid_date: form.paid_date || null,
         record_type: form.record_type,
         billed_amount: form.billed_amount === '' ? null : Number(form.billed_amount),
         allowed_amount: form.allowed_amount === '' ? null : Number(form.allowed_amount),
@@ -170,6 +173,7 @@ export default function ClientClaimsPanel({ client }) {
       setForm(EMPTY_FORM)
       setFile(null)
       await fetchClaims()
+      await onClaimsChanged?.()
     } catch (submitError) {
       setError(submitError.message || 'Failed to save claim.')
     } finally {
@@ -192,6 +196,7 @@ export default function ClientClaimsPanel({ client }) {
     }
 
     await fetchClaims()
+    await onClaimsChanged?.()
   }
 
   return (
@@ -253,6 +258,15 @@ export default function ClientClaimsPanel({ client }) {
                 type="date"
                 value={form.date_of_service}
                 onChange={(e) => handleFormChange('date_of_service', e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Payment Date</label>
+              <input
+                type="date"
+                value={form.paid_date}
+                onChange={(e) => handleFormChange('paid_date', e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
               />
             </div>
@@ -357,6 +371,7 @@ export default function ClientClaimsPanel({ client }) {
                   <div className="text-xs text-gray-600 mt-1">
                     {claim.claim_number ? `Claim #${claim.claim_number} • ` : ''}Date of Service: {formatDate(claim.date_of_service)}
                   </div>
+                  <div className="text-xs text-gray-600">Payment Date: {formatDate(claim.paid_date)}</div>
                 </div>
                 <div className="flex items-center gap-2">
                   {claim.file_url && (

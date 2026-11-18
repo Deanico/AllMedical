@@ -106,10 +106,32 @@ Cross-check:
 - `sum(Expenses where entry_type='shipment')` equals Shipment Cost card
 - `Net Profit = Revenue - Expenses - Shipment Cost`
 
-The dashboard's Monthly Revenue is the current calendar month's revenue from the
-Reports monthly P&L (paid claims), not the insurance calculator's estimated profit.
-It reflects the most recently synced financial data. As in Reports, a claim with
-no paid date is assigned to its sync month.
+## Website financial reports
+
+Run `web/add-patient-financial-reporting.sql` in the Supabase SQL Editor before
+deploying this version. It adds patient expense classification and optional claim
+payment dates; existing expenses remain general expenses and existing claims
+keep an unknown payment date. Expense records are restricted to administrators.
+
+Reports -> General uses paid claim records from patient profiles and subtracts
+both patient and general expenses entered on the website. Claim and EOB records
+may describe the same payment, so EOBs are excluded. Verify duplicate claims
+and enter all costs before treating recorded net as complete profit. The
+Google Sheets section is retained as a separate historical reference and is
+not added to website totals.
+
+Regular and extra patient expenses are individual entries, not recurring
+charges. Patient expenses can be added in each patient's Financial tab; general
+expenses remain in Reports. Projections and By Insurance are calculator
+estimates and are separate from recorded financials.
+
+The dashboard's Average Monthly Revenue divides all recorded paid claim revenue
+by the number of calendar months from the earliest paid claim's service date
+through the current month, including months with no claims. Undated and
+future-dated paid amounts remain in the total; the card identifies them because
+the average may be misleading. If no paid claim has a service date up to the
+current month, the average is unavailable. This is not monthly cash received.
+The historical Google monthly P&L still assigns undated rows to their sync month.
 
 ## Client growth on the dashboard
 
@@ -118,6 +140,9 @@ shows the last six calendar months of net client changes: qualifying a lead adds
 one, while changing a qualified lead to another stage or deleting it subtracts
 one. Pausing a client does not change qualification. Months follow the viewer's
 local time.
+Select a month to see the recorded qualifications; the bar shows the net after
+removals, so it may differ from the number of new patients listed. Deleted or
+otherwise unavailable patient records cannot be named.
 
 The migration backfills currently qualified leads only when `qualified_at` is
 known. Past removals, earlier qualification cycles, deleted leads, and missing

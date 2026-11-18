@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import ClientPortalDashboard from './ClientPortalDashboard'
 import ClientClaimsPanel from './ClientClaimsPanel'
+import ClientExpensesPanel from './ClientExpensesPanel'
 import SecureFileLink from './SecureFileLink'
 import PatientMessagesPanel from './PatientMessagesPanel'
 import AllMessagesPanel from './AllMessagesPanel'
@@ -10,7 +11,8 @@ import { generateTreatmentRecords, getTreatmentRecordSupplierLabel } from '../li
 import { generateHardshipForm } from '../lib/generateHardshipForm'
 import { calculateInsuranceProjection } from '../lib/insuranceProjection'
 import { getPortalRedirectUrl } from '../lib/portalUrls'
-import { calculateClientGrowth, getGrowthStart, getMonthKey } from '../lib/dashboardMetrics'
+import { calculateClientGrowth, getGrowthStart, getMonthKey, getNewClientGrowthEvents } from '../lib/dashboardMetrics'
+import { calculateWebsiteFinancials } from '../lib/websiteFinancials'
 
 const parseDateInput = (value) => {
   if (!value) return null
@@ -211,6 +213,7 @@ const DashboardIcon = ({ name, className = 'h-5 w-5' }) => {
 export default function AdminDashboard({ userEmail, onLogout }) {
   const queueStatuses = ['pending', 'reviewed', 'ready_to_order', 'ordered']
   const [activeView, setActiveView] = useState('dashboard')
+  const [reportsTab, setReportsTab] = useState('general')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [activeTab, setActiveTab] = useState('leads')
   const [leads, setLeads] = useState([])
@@ -245,10 +248,14 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const [financialPnlTotals, setFinancialPnlTotals] = useState(null)
   const [financialPnlMonthly, setFinancialPnlMonthly] = useState([])
   const [financialLastSyncedAt, setFinancialLastSyncedAt] = useState(null)
-  const [monthlyRevenue, setMonthlyRevenue] = useState(null)
   const [financialReportError, setFinancialReportError] = useState(null)
+  const [websiteClaims, setWebsiteClaims] = useState(null)
+  const [websiteClaimsError, setWebsiteClaimsError] = useState(null)
   const [clientGrowthEvents, setClientGrowthEvents] = useState(null)
   const [clientGrowthError, setClientGrowthError] = useState(null)
+  const [selectedGrowthMonth, setSelectedGrowthMonth] = useState(null)
+  const [growthPatientNames, setGrowthPatientNames] = useState(null)
+  const [growthPatientError, setGrowthPatientError] = useState(null)
   const [portalInviteSending, setPortalInviteSending] = useState(false)
   const [portalInviteMessage, setPortalInviteMessage] = useState(null)
   const [showPortalPreview, setShowPortalPreview] = useState(false)
@@ -736,6 +743,8 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
   // Expenses & Revenue State
   const [expenses, setExpenses] = useState([])
+  const [expensesLoaded, setExpensesLoaded] = useState(false)
+  const [expensesError, setExpensesError] = useState(null)
   const [showAddExpenseModal, setShowAddExpenseModal] = useState(false)
   const [expenseForm, setExpenseForm] = useState({ description: '', amount: '', category: '', date: '' })
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth())
@@ -757,11 +766,42 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   }, [])
 
   useEffect(() => {
-    if (activeView === 'dashboard' || activeView === 'reports') {
+    if (activeView === 'reports') {
       fetchFinancialReportsData()
+      fetchExpenses()
     }
+    if (activeView === 'dashboard' || activeView === 'reports') fetchWebsiteClaims()
     if (activeView === 'dashboard') fetchClientGrowth()
   }, [activeView])
+
+  useEffect(() => {
+    if (!selectedGrowthMonth || !clientGrowthEvents || !supabase) return
+    let cancelled = false
+    setGrowthPatientNames(null)
+    setGrowthPatientError(null)
+
+    const loadPatientNames = async () => {
+      try {
+        const events = getNewClientGrowthEvents(clientGrowthEvents, selectedGrowthMonth)
+        const ids = [...new Set(events.map(event => event.lead_id).filter(Boolean))]
+        const names = {}
+        for (let offset = 0; offset < ids.length; offset += 100) {
+          const { data, error } = await supabase.from('leads')
+            .select('id, name')
+            .in('id', ids.slice(offset, offset + 100))
+          if (error) throw error
+          data.forEach(patient => { names[patient.id] = patient.name })
+        }
+        if (!cancelled) setGrowthPatientNames(names)
+      } catch (error) {
+        console.error('Error fetching client growth patients:', error)
+        if (!cancelled) setGrowthPatientError('Unable to load patient names for this month.')
+      }
+    }
+
+    loadPatientNames()
+    return () => { cancelled = true }
+  }, [selectedGrowthMonth, clientGrowthEvents])
 
   useEffect(() => {
     setActiveClientTab('overview')
@@ -1150,14 +1190,50 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   const fetchExpenses = async () => {
     if (!supabase) return
     try {
-      const { data, error } = await supabase
-        .from('expenses')
-        .select('*')
-        .order('date', { ascending: false })
-      if (error) throw error
-      setExpenses(data || [])
+      const rows = []
+      const pageSize = 500
+      let data
+      do {
+        const response = await supabase.from('expenses')
+          .select('id, lead_id, expense_type, description, amount, category, date')
+          .order('date', { ascending: false })
+          .order('id', { ascending: true })
+          .range(rows.length, rows.length + pageSize - 1)
+        if (response.error) throw response.error
+        data = response.data
+        rows.push(...data)
+      } while (data.length === pageSize)
+      setExpenses(rows)
+      setExpensesLoaded(true)
+      setExpensesError(null)
     } catch (error) {
       console.error('Error fetching expenses:', error)
+      setExpensesLoaded(false)
+      setExpensesError('Expenses unavailable. Check that the patient financial reporting migration has been run.')
+    }
+  }
+
+  const fetchWebsiteClaims = async () => {
+    if (!supabase) return
+    try {
+      const rows = []
+      const pageSize = 500
+      let data
+      do {
+        const response = await supabase.from('client_claims')
+          .select('id, status, record_type, paid_amount, date_of_service')
+          .order('id', { ascending: true })
+          .range(rows.length, rows.length + pageSize - 1)
+        if (response.error) throw response.error
+        data = response.data
+        rows.push(...data)
+      } while (data.length === pageSize)
+      setWebsiteClaims(rows)
+      setWebsiteClaimsError(null)
+    } catch (error) {
+      console.error('Error fetching patient claims for reports:', error)
+      setWebsiteClaims(null)
+      setWebsiteClaimsError('Patient claims unavailable. Check the Claims & EOBs setup.')
     }
   }
 
@@ -1174,7 +1250,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       do {
         const response = await supabase
           .from('client_growth_events')
-          .select('id, occurred_at, change')
+          .select('id, lead_id, occurred_at, change')
           .gte('occurred_at', start.toISOString())
           .lt('occurred_at', end.toISOString())
           .order('occurred_at', { ascending: true })
@@ -1198,13 +1274,11 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     if (!supabase) return
 
     try {
-      const month = getMonthKey(new Date())
       const [
         claimsResponse,
         opsResponse,
         pnlTotalsResponse,
         pnlMonthlyResponse,
-        currentMonthResponse,
         syncJobsResponse
       ] = await Promise.all([
         supabase
@@ -1228,11 +1302,6 @@ export default function AdminDashboard({ userEmail, onLogout }) {
           .order('month', { ascending: false })
           .limit(24),
         supabase
-          .from('v_profit_loss_monthly')
-          .select('revenue')
-          .eq('month', month)
-          .maybeSingle(),
-        supabase
           .from('sheet_sync_jobs')
           .select('created_at, status, claims_rows_upserted, ops_rows_upserted, error_message')
           .eq('sync_type', 'financial_sheets')
@@ -1249,19 +1318,16 @@ export default function AdminDashboard({ userEmail, onLogout }) {
       }
 
       if (pnlMonthlyResponse.error) throw pnlMonthlyResponse.error
-      if (currentMonthResponse.error) throw currentMonthResponse.error
       if (syncJobsResponse.error) throw syncJobsResponse.error
 
       setFinancialClaimsRows(claimsResponse.data || [])
       setFinancialOpsRows(opsResponse.data || [])
       setFinancialPnlTotals(pnlTotalsResponse.data || null)
       setFinancialPnlMonthly(pnlMonthlyResponse.data || [])
-      setMonthlyRevenue({ month, value: currentMonthResponse.data?.revenue ?? 0 })
       setFinancialLastSyncedAt(syncJobsResponse.data?.[0]?.created_at || null)
       setFinancialReportError(null)
     } catch (error) {
       console.error('Error fetching financial report data:', error)
-      setMonthlyRevenue(null)
       setFinancialReportError('Financial report data is unavailable.')
     }
   }
@@ -1649,32 +1715,6 @@ export default function AdminDashboard({ userEmail, onLogout }) {
     } catch (error) {
       console.error('Error updating stage:', error)
       alert('Failed to update stage: ' + (error?.message || 'Unknown error'))
-    } finally {
-      setUpdating(false)
-    }
-  }
-
-  const updateLeadHandling = async (leadId, handling) => {
-    if (!supabase) return
-    setUpdating(true)
-
-    try {
-      const { error } = await supabase
-        .from('leads')
-        .update({ handling })
-        .eq('id', leadId)
-
-      if (error) throw error
-
-      setLeads(prevLeads => prevLeads.map(lead => (
-        lead.id === leadId ? { ...lead, handling } : lead
-      )))
-      setSelectedClient(prevClient => (
-        prevClient?.id === leadId ? { ...prevClient, handling } : prevClient
-      ))
-    } catch (error) {
-      console.error('Error updating lead handling:', error)
-      alert('Failed to update lead handling: ' + (error?.message || 'Unknown error'))
     } finally {
       setUpdating(false)
     }
@@ -3105,6 +3145,10 @@ export default function AdminDashboard({ userEmail, onLogout }) {
   )
   const qualifiedLeads = leads.filter(lead => lead.stage === 'qualified')
   const activeQualifiedLeads = qualifiedLeads.filter(lead => !lead.is_paused)
+  const websiteFinancials = websiteClaims
+    ? calculateWebsiteFinancials(websiteClaims, expenses, getMonthKey(new Date()))
+    : null
+  const generalExpenses = expenses.filter(expense => !expense.lead_id)
   const todayDateString = getLocalTodayDateString()
   const todayTasks = tasks
     .filter(task => task.due_date === todayDateString)
@@ -3314,11 +3358,11 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                 <div className="admin-card p-6">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Monthly Revenue</p>
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Average Monthly Revenue</p>
                       <p className="text-3xl font-extrabold text-slate-900 mt-2">
-                        {financialReportError ? 'Unavailable' : monthlyRevenue?.month === getMonthKey(new Date())
-                          ? formatCurrency(monthlyRevenue.value)
-                          : 'Loading...'}
+                        {websiteClaimsError ? 'Unavailable' : !websiteFinancials ? 'Loading...'
+                          : websiteFinancials.averageMonthlyRevenue === null ? 'Unavailable'
+                            : formatCurrency(websiteFinancials.averageMonthlyRevenue)}
                       </p>
                     </div>
                     <div className="h-12 w-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center">
@@ -3326,7 +3370,11 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                     </div>
                   </div>
                   <p className="text-sm text-slate-500 mt-4">
-                    {financialReportError || `Current month paid claims from Reports. Last sync: ${financialLastSyncedAt ? formatDisplayDate(financialLastSyncedAt) : 'Not synced yet'}`}
+                    {websiteClaimsError || (websiteFinancials
+                      ? websiteFinancials.averageMonthCount
+                        ? `Total paid claims divided by ${websiteFinancials.averageMonthCount} calendar ${websiteFinancials.averageMonthCount === 1 ? 'month' : 'months'} since ${websiteFinancials.averageStartMonth}. ${websiteFinancials.undatedCount} recorded ${websiteFinancials.undatedCount === 1 ? 'claim lacks' : 'claims lack'} a service date; ${websiteFinancials.missingAmountCount} paid ${websiteFinancials.missingAmountCount === 1 ? 'claim lacks' : 'claims lack'} an amount; ${websiteFinancials.futureServiceCount} have a future service month.`
+                        : 'No paid claims with a service date up to this month.'
+                      : 'Loading patient claims...')}
                   </p>
                 </div>
 
@@ -3355,7 +3403,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                 {/* Client Growth */}
                 <div className="bg-white rounded-lg shadow p-6">
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">Client Growth</h3>
-                  <p className="text-sm text-gray-500 mb-4">Net qualifications and removals by month. Earlier history may be incomplete.</p>
+                  <p className="text-sm text-gray-500 mb-4">Net qualifications and removals by month. Select a month to see new patients. Earlier history may be incomplete.</p>
                   <div className="space-y-3">
                     {clientGrowthError ? (
                       <p className="text-sm text-red-700">{clientGrowthError}</p>
@@ -3368,20 +3416,56 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                       return clientGrowthData.map((data) => {
                         const percentage = (Math.abs(data.clients) / maxClients) * 100
                         return (
-                          <div key={data.month} className="flex items-center gap-3">
-                            <div className="w-20 text-sm text-gray-600">{data.label}</div>
-                            <div className="flex-1 bg-gray-200 rounded-full h-3">
-                              <div 
-                                className={`${data.clients < 0 ? 'bg-red-600' : 'bg-blue-600'} rounded-full h-3`}
+                          <button key={data.month} type="button" onClick={() => setSelectedGrowthMonth(data.month)}
+                            aria-expanded={selectedGrowthMonth === data.month} aria-controls="growth-month-details"
+                            aria-label={`View new patients for ${data.label}, net change ${data.clients}`}
+                            className="flex w-full items-center gap-3 rounded text-left hover:bg-blue-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600">
+                            <span className="w-20 text-sm text-gray-600">{data.label}</span>
+                            <span className="flex-1 bg-gray-200 rounded-full h-3">
+                              <span
+                                className={`block ${data.clients < 0 ? 'bg-red-600' : 'bg-blue-600'} rounded-full h-3`}
                                 style={{ width: `${percentage}%` }}
-                              ></div>
-                            </div>
-                            <div className="w-12 text-sm font-semibold text-gray-900 text-right">{data.clients}</div>
-                          </div>
+                              />
+                            </span>
+                            <span className="w-12 text-sm font-semibold text-gray-900 text-right">{data.clients}</span>
+                          </button>
                         )
                       })
                     })()}
                   </div>
+                  {selectedGrowthMonth && clientGrowthEvents && (() => {
+                    const selectedMonth = calculateClientGrowth(clientGrowthEvents).find(row => row.month === selectedGrowthMonth)
+                    if (!selectedMonth) return null
+                    const newPatients = getNewClientGrowthEvents(clientGrowthEvents, selectedGrowthMonth)
+                    const removals = newPatients.length - selectedMonth.clients
+                    return (
+                      <section id="growth-month-details" className="mt-5 border-t border-gray-200 pt-4" aria-label={`New patients in ${selectedMonth.label}`}>
+                        <div className="flex items-center justify-between gap-3">
+                          <h4 className="font-semibold text-gray-900">New patients: {selectedMonth.label}</h4>
+                          <button type="button" onClick={() => setSelectedGrowthMonth(null)} className="text-sm text-blue-700 hover:underline">Close</button>
+                        </div>
+                        <p className="text-xs text-gray-600 mt-1">
+                          {newPatients.length} {newPatients.length === 1 ? 'qualification' : 'qualifications'}, {removals} {removals === 1 ? 'removal' : 'removals'}; net change {selectedMonth.clients}.
+                        </p>
+                        {growthPatientError ? (
+                          <p role="alert" className="text-sm text-red-700 mt-3">{growthPatientError}</p>
+                        ) : !growthPatientNames ? (
+                          <p className="text-sm text-gray-500 mt-3">Loading patients...</p>
+                        ) : newPatients.length === 0 ? (
+                          <p className="text-sm text-gray-500 mt-3">No qualifications recorded this month.</p>
+                        ) : (
+                          <ul className="mt-3 space-y-2 max-h-60 overflow-y-auto">
+                            {newPatients.map(event => (
+                              <li key={event.id} className="flex justify-between gap-3 text-sm">
+                                <span className="font-medium text-gray-900">{growthPatientNames[event.lead_id] || 'Patient record unavailable'}</span>
+                                <span className="text-gray-500">{formatShortDate(event.occurred_at)}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </section>
+                    )
+                  })()}
                 </div>
 
                 {/* Product Demand */}
@@ -3559,17 +3643,11 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                             >
                               {lead.name}
                             </button>
-                            <select
-                              aria-label={`Campaign handling for ${lead.name}`}
-                              value={lead.handling || 'call'}
-                              onChange={(e) => updateLeadHandling(lead.id, e.target.value)}
-                              disabled={updating}
-                              className={`ml-2 rounded-full px-2 py-0.5 text-xs font-medium ${handlingOption.className} border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500`}
-                            >
-                              {LEAD_HANDLING_OPTIONS.map((option) => (
-                                <option key={option.value} value={option.value}>{option.label}</option>
-                              ))}
-                            </select>
+                            {lead.handling && (
+                              <span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-medium ${handlingOption.className}`}>
+                                {handlingOption.label}
+                              </span>
+                            )}
                           </td>
                           <td className="px-3 py-3 text-sm text-gray-600 truncate">
                             {lead.phone}
@@ -3622,17 +3700,11 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                           >
                             {lead.name}
                           </button>
-                          <select
-                            aria-label={`Campaign handling for ${lead.name}`}
-                            value={lead.handling || 'call'}
-                            onChange={(e) => updateLeadHandling(lead.id, e.target.value)}
-                            disabled={updating}
-                            className={`px-2 py-1 rounded-full text-xs font-medium ${LEAD_HANDLING_OPTIONS.find((option) => option.value === lead.handling)?.className || LEAD_HANDLING_OPTIONS[0].className} border-0 cursor-pointer`}
-                          >
-                            {LEAD_HANDLING_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>{option.label}</option>
-                            ))}
-                          </select>
+                          {lead.handling && (
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${(LEAD_HANDLING_OPTIONS.find((option) => option.value === lead.handling) || LEAD_HANDLING_OPTIONS[0]).className}`}>
+                              {(LEAD_HANDLING_OPTIONS.find((option) => option.value === lead.handling) || LEAD_HANDLING_OPTIONS[0]).label}
+                            </span>
+                          )}
                         </div>
                         <select
                           value={lead.stage}
@@ -4447,6 +4519,13 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
                     {activeClientTab === 'financial' && (
                     <>
+                    <ClientExpensesPanel
+                      key={selectedClient.id}
+                      client={selectedClient}
+                      expenses={expenses.filter(expense => expense.lead_id === selectedClient.id)}
+                      error={expensesError || (!expensesLoaded ? 'Loading expenses...' : null)}
+                      onRefresh={fetchExpenses}
+                    />
                     {/* Payment Calculator Section */}
                     <div className="border-t pt-4">
                       <div className="flex items-center justify-between mb-3">
@@ -4600,7 +4679,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
                     {activeClientTab === 'claims' && (
                     <div className="border-t pt-4">
-                      <ClientClaimsPanel client={selectedClient} />
+                      <ClientClaimsPanel client={selectedClient} onClaimsChanged={fetchWebsiteClaims} />
                     </div>
                     )}
 
@@ -5744,15 +5823,57 @@ export default function AdminDashboard({ userEmail, onLogout }) {
 
           return (
             <div className="space-y-4 sm:space-y-6">
+              <div role="tablist" aria-label="Reports sections" className="flex flex-wrap gap-2 border-b border-gray-200 pb-3">
+                {[['general', 'General'], ['projections', 'Projections'], ['insurance', 'By Insurance']].map(([key, label]) => (
+                  <button key={key} type="button" role="tab" aria-selected={reportsTab === key} onClick={() => setReportsTab(key)}
+                    className={`px-4 py-2 rounded-md text-sm font-semibold ${reportsTab === key ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {reportsTab === 'general' && (
+              <>
+              <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+                <h2 className="text-2xl font-bold text-gray-900">Website Financials</h2>
+                <p className="text-sm text-gray-600 mt-1">All-time paid claim records and recorded website expenses. Google Sheets and projections are not included.</p>
+                {(websiteClaimsError || expensesError) && (
+                  <p role="alert" className="mt-3 text-sm text-red-700">{[websiteClaimsError, expensesError].filter(Boolean).join(' ')}</p>
+                )}
+                {!websiteClaimsError && !expensesError && websiteFinancials && expensesLoaded ? (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+                      <div className="bg-green-50 border border-green-300 rounded-lg p-4">
+                        <div className="text-sm font-semibold text-green-800">Paid Claims Revenue</div>
+                        <div className="text-2xl font-bold text-green-700">{formatCurrency(websiteFinancials.totalRevenue)}</div>
+                      </div>
+                      <div className="bg-gray-100 border border-gray-300 rounded-lg p-4">
+                        <div className="text-sm font-semibold text-gray-700">Recorded Expenses</div>
+                        <div className="text-2xl font-bold text-gray-900">{formatCurrency(websiteFinancials.totalExpenses)}</div>
+                        <div className="text-xs text-gray-600">Patient: {formatCurrency(websiteFinancials.patientExpenses)} · General: {formatCurrency(websiteFinancials.generalExpenses)}</div>
+                      </div>
+                      <div className="bg-blue-50 border border-blue-300 rounded-lg p-4">
+                        <div className="text-sm font-semibold text-blue-800">Recorded Net</div>
+                        <div className="text-2xl font-bold text-blue-700">{formatCurrency(websiteFinancials.net)}</div>
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-600 mt-3">
+                      Net is paid claim revenue minus recorded expenses, not a complete profit figure unless all costs are entered.
+                      EOBs are excluded to avoid counting the same claim twice; duplicate claim records still need review. {websiteFinancials.missingAmountCount} paid claims have no amount; {websiteFinancials.undatedCount} recorded claims have no service date.
+                    </p>
+                  </>
+                ) : !websiteClaimsError && !expensesError ? <p className="mt-3 text-sm text-gray-500">Loading website financials...</p> : null}
+              </div>
+              <details className="bg-white rounded-lg shadow">
+              <summary className="cursor-pointer p-4 font-semibold text-gray-900">Google Sheets historical reference</summary>
               {financialReportError && (
-                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">{financialReportError}</div>
+                <div className="mx-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">{financialReportError}</div>
               )}
               <div className="bg-white rounded-lg shadow p-4 sm:p-6">
                 <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-6">
                   <div>
                     <h2 className="text-2xl font-bold text-gray-900">Financial Reports (Google Sheets)</h2>
                     <p className="text-sm text-gray-600 mt-1">
-                      Last sync: {financialLastSyncedAt ? formatDisplayDate(financialLastSyncedAt) : 'Not synced yet'}
+                      Historical reference only; not included in website totals. Last sync: {financialLastSyncedAt ? formatDisplayDate(financialLastSyncedAt) : 'Not synced yet'}
                     </p>
                   </div>
                   <button
@@ -5785,25 +5906,6 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   <div className="bg-violet-50 border border-violet-300 rounded-lg p-4">
                     <div className="text-xs uppercase tracking-wide text-violet-800 font-semibold">Margin</div>
                     <div className="text-2xl font-bold text-violet-700 mt-1">{profitMarginPercent.toFixed(2)}%</div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
-                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
-                    <div className="text-xs uppercase tracking-wide text-slate-600 font-semibold">Qualified Clients</div>
-                    <div className="text-2xl font-bold text-slate-900 mt-1">{clientsWithCalc.length}</div>
-                  </div>
-                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
-                    <div className="text-xs uppercase tracking-wide text-slate-600 font-semibold">Gross Revenue</div>
-                    <div className="text-2xl font-bold text-slate-900 mt-1">{formatCurrency(totals.totalGrossRevenue)}</div>
-                  </div>
-                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
-                    <div className="text-xs uppercase tracking-wide text-slate-600 font-semibold">Net Client Profit</div>
-                    <div className="text-2xl font-bold text-slate-900 mt-1">{formatCurrency(totals.totalNetProfit)}</div>
-                  </div>
-                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
-                    <div className="text-xs uppercase tracking-wide text-slate-600 font-semibold">Avg Profit / Client</div>
-                    <div className="text-2xl font-bold text-slate-900 mt-1">{formatCurrency(avgProfitPerCustomer)}</div>
                   </div>
                 </div>
 
@@ -5920,11 +6022,12 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   </div>
                 </div>
               </div>
+              </details>
 
               {/* Expense Management Section */}
               <div className="bg-white rounded-lg shadow p-4 sm:p-6">
                 <div className="flex justify-between items-center mb-6">
-                  <h2 className="text-2xl font-bold text-gray-900">Expense Management</h2>
+                  <h2 className="text-2xl font-bold text-gray-900">General Expenses</h2>
                   <button
                     onClick={() => setShowAddExpenseModal(true)}
                     className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md text-sm font-medium"
@@ -5933,30 +6036,14 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   </button>
                 </div>
 
-                {/* Monthly P&L Summary */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                  <div className="bg-green-50 border-2 border-green-500 rounded-lg p-4">
-                    <div className="text-sm font-medium text-green-800 mb-1">Revenue (from clients)</div>
-                    <div className="text-2xl font-bold text-green-700">
-                      ${totals.totalNetProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                    </div>
-                  </div>
-                  <div className="bg-red-50 border-2 border-red-500 rounded-lg p-4">
-                    <div className="text-sm font-medium text-red-800 mb-1">Total Expenses</div>
-                    <div className="text-2xl font-bold text-red-700">
-                      ${expenses.reduce((sum, e) => sum + parseFloat(e.amount || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                    </div>
-                  </div>
-                  <div className="bg-blue-50 border-2 border-blue-500 rounded-lg p-4">
-                    <div className="text-sm font-medium text-blue-800 mb-1">Net Profit</div>
-                    <div className="text-2xl font-bold text-blue-700">
-                      ${(totals.totalNetProfit - expenses.reduce((sum, e) => sum + parseFloat(e.amount || 0), 0)).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                    </div>
-                  </div>
-                </div>
+                <p className="text-sm text-gray-600 mb-4">Expenses not assigned to a patient. Patient expenses are entered in each patient's Financial tab.</p>
 
                 {/* Expenses List */}
-                {expenses.length > 0 ? (
+                {expensesError ? (
+                  <p role="alert" className="text-sm text-red-700">{expensesError}</p>
+                ) : !expensesLoaded ? (
+                  <p className="text-sm text-gray-500">Loading expenses...</p>
+                ) : generalExpenses.length > 0 ? (
                   <div className="border rounded-lg overflow-hidden">
                     <table className="w-full">
                       <thead className="bg-gray-50 border-b">
@@ -5969,7 +6056,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200">
-                        {expenses.map((expense) => (
+                        {generalExpenses.map((expense) => (
                           <tr key={expense.id} className="hover:bg-gray-50">
                             <td className="px-4 py-3 text-sm text-gray-700">
                               {formatShortDate(expense.date)}
@@ -5989,8 +6076,12 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                                       .from('expenses')
                                       .delete()
                                       .eq('id', expense.id)
-                                    if (!error) {
-                                      setExpenses(expenses.filter(e => e.id !== expense.id))
+                                      .select('id')
+                                      .single()
+                                    if (error) {
+                                      alert('Failed to delete expense: ' + error.message)
+                                    } else {
+                                      await fetchExpenses()
                                     }
                                   }
                                 }}
@@ -6246,16 +6337,20 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   </div>
                 )}
               </div>
-
+              </>
+              )}
+              {reportsTab !== 'general' && (
               <div className="bg-white rounded-lg shadow p-4 sm:p-6">
                 <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-6 sm:mb-8 flex items-center gap-2 sm:gap-3">
-                  <span>📊 Business Analytics</span>
+                  <span>{reportsTab === 'insurance' ? 'Projected Profit by Insurance' : 'Annual Client Projections'}</span>
                 </h2>
+                <p className="text-sm text-gray-600 mb-4">Estimates from client insurance calculators, not paid claims or recorded expenses.</p>
 
                 {/* Overall Stats */}
+                {reportsTab === 'projections' && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 mb-6 sm:mb-8">
                   <div className="bg-gradient-to-br from-green-50 to-green-100 border-2 border-green-500 rounded-lg p-4 sm:p-6">
-                    <div className="text-xs sm:text-sm font-medium text-green-800 mb-2">💰 Total Gross Revenue</div>
+                    <div className="text-xs sm:text-sm font-medium text-green-800 mb-2">Projected Gross Revenue / Year</div>
                     <div className="text-2xl sm:text-3xl font-bold text-green-700">
                       ${totals.totalGrossRevenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
@@ -6263,11 +6358,11 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   </div>
 
                   <div className="bg-gradient-to-br from-blue-50 to-blue-100 border-2 border-blue-500 rounded-lg p-4 sm:p-6">
-                    <div className="text-xs sm:text-sm font-medium text-blue-800 mb-2">✨ Total Net Profit</div>
+                    <div className="text-xs sm:text-sm font-medium text-blue-800 mb-2">Projected Net Profit / Year</div>
                     <div className="text-2xl sm:text-3xl font-bold text-blue-700">
                       ${totals.totalNetProfit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
-                    <div className="text-xs text-blue-600 mt-2">After all costs</div>
+                    <div className="text-xs text-blue-600 mt-2">After projected product costs</div>
                   </div>
 
                   <div className="bg-gradient-to-br from-purple-50 to-purple-100 border-2 border-purple-500 rounded-lg p-4 sm:p-6">
@@ -6286,8 +6381,10 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                     <div className="text-xs text-orange-600 mt-2">Per year</div>
                   </div>
                 </div>
+                )}
 
                 {/* Insurance Company Breakdown */}
+                {reportsTab === 'insurance' && (
                 <div className="mt-8">
                   <h3 className="text-xl font-bold text-gray-900 mb-4">🏥 Average Profit by Insurance Company</h3>
                   <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -6319,6 +6416,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                     ))}
                   </div>
                 </div>
+                )}
 
                 {clientsWithCalc.length === 0 && (
                   <div className="text-center py-12 text-gray-500">
@@ -6329,7 +6427,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                 )}
 
                 {/* Client Details Table - Show clients WITH calculator data */}
-                {clientsWithCalc.length > 0 && (
+                {reportsTab === 'projections' && clientsWithCalc.length > 0 && (
                   <div className="mt-8">
                     <h3 className="text-xl font-bold text-gray-900 mb-4">
                       📋 Client Profit Details ({clientsWithCalc.length} clients)
@@ -6435,6 +6533,7 @@ export default function AdminDashboard({ userEmail, onLogout }) {
                   return null
                 })()}
               </div>
+              )}
             </div>
           )
         })()}

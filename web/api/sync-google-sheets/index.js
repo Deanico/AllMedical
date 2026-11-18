@@ -126,8 +126,6 @@ module.exports = async function (context, req) {
       });
     }
 
-    markCombinedCampaignCandidates(candidates);
-
     if (candidates.length === 0) {
       context.res = {
         status: 200,
@@ -144,11 +142,12 @@ module.exports = async function (context, req) {
       return;
     }
 
-    const existingLeads = await getExistingLeads(supabase, candidates.map((candidate) => candidate.email));
+    const existingLeads = await getExistingLeads(supabase);
+    const combinedIdentities = markCombinedCampaignCandidates(candidates, existingLeads);
 
     const existingEmailSet = new Set((existingLeads || []).map((lead) => String(lead.email || '').toLowerCase()));
 
-    await updateExistingLeads(supabase, candidates, existingLeads);
+    await updateExistingLeads(supabase, candidates, existingLeads, combinedIdentities);
 
     let added = 0;
     for (const candidate of candidates) {
